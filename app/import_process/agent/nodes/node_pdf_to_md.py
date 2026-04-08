@@ -256,7 +256,9 @@ def step_3_download_and_extract(zip_url: str, output_dir_obj: Path, pdf_stem: st
 
     # 1. 下载解析结果ZIP包，120秒超时适配大文件
     logger.info(f"[步骤1/4] 开始下载ZIP包，链接：{zip_url}...")
-    resp = requests.get(zip_url, timeout=120)
+    download_session = requests.Session()
+    download_session.trust_env = False
+    resp = download_session.get(zip_url, timeout=120)
     if resp.status_code != 200:
         raise RuntimeError(f"[步骤1/4] ZIP包下载失败，HTTP状态码：{resp.status_code}")
 
