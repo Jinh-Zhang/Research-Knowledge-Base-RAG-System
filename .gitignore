@@ -1,2 +1,7 @@
 /.env
 /doc/
+/output
+/volumes
+/logs
+**/__pycache__/
+*.pyc
