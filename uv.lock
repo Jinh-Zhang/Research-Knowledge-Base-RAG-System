@@ -1466,12 +1466,13 @@ dependencies = [
     { name = "modelscope" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "pymilvus" },
+    { name = "pymilvus", extra = ["model"] },
     { name = "pymilvus-model" },
     { name = "pymongo" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "regex" },
+    { name = "transformers" },
     { name = "uvicorn" },
 ]
 
@@ -1490,12 +1491,13 @@ requires-dist = [
     { name = "modelscope", specifier = ">=1.35.3" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "pandas", specifier = ">=3.0.2" },
-    { name = "pymilvus", specifier = ">=2.6.11" },
+    { name = "pymilvus", extras = ["model"], specifier = ">=2.6.11" },
     { name = "pymilvus-model", specifier = ">=0.3.2" },
     { name = "pymongo", specifier = ">=4.16.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "python-multipart", specifier = ">=0.0.22" },
     { name = "regex", specifier = ">=2026.3.32" },
+    { name = "transformers", specifier = ">=4.57.6" },
     { name = "uvicorn", specifier = ">=0.42.0" },
 ]
 
@@ -3065,6 +3067,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c9/e6/0adc3b374f5c5d1eebd4f551b455c6865c449b170b17545001b208e2b153/pymilvus-2.6.11.tar.gz", hash = "sha256:a40c10322cde25184a8c3d84993a14dfb67ad2bdcfc5dff7e68b11a79ff8f6d8", size = 1583634, upload-time = "2026-03-27T06:25:46.023Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9c/1c/bccb331d71f824738f80f11e9b8b4da47973c903826355526ae4fa2b762f/pymilvus-2.6.11-py3-none-any.whl", hash = "sha256:a11e1718b15045361c71ca671b959900cb7e2faae863c896f6b7e87bf2e4d10a", size = 315252, upload-time = "2026-03-27T06:25:44.215Z" },
+]
+
+[package.optional-dependencies]
+model = [
+    { name = "pymilvus-model" },
 ]
 
 [[package]]
