@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 # 提前加载.env配置文件（确保os.getenv能获取到MinIO相关配置）
-load_dotenv()
+load_dotenv(override=True)
 
 
 # 定义MinIO对象存储服务配置（与LLMConfig风格一致，字段对应.env配置项）

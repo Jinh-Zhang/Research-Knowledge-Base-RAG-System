@@ -9,8 +9,8 @@ from pathlib import Path
 
 # 项目内部库
 from app.import_process.agent.state import ImportGraphState, create_default_state
-from app.utils.task_utils import add_running_task, add_done_task
 from app.utils.format_utils import format_state
+from app.utils.task_utils import add_running_task, add_done_task
 from app.conf.mineru_config import mineru_config
 from app.core.logger import logger  # 统一日志工具
 
@@ -19,63 +19,7 @@ MINERU_BASE_URL = mineru_config.base_url
 MINERU_API_TOKEN = mineru_config.api_token
 
 
-def node_pdf_to_md(state: ImportGraphState) -> ImportGraphState:
-    """
-    LangGraph工作流节点：PDF转MD核心处理节点
-    核心流程：路径校验 → MinerU上传解析 → 结果下载解压 → 读取MD内容并更新工作流状态
-    参数：state-工作流状态对象，需包含pdf_path/local_dir/task_id
-    返回：更新后的工作流状态，新增md_path/md_content
-    """
-
-    # 动态获取函数名避免硬编码
-    func_name = sys._getframe().f_code.co_name
-
-    # 节点启动日志，打印当前工作流状态
-    logger.debug(f"【{func_name}】节点启动，\n当前工作流状态：{format_state(state)}")
-
-    # 开始：记录节点运行状态
-    add_running_task(state["task_id"], func_name)
-
-
-    try:
-        # 步骤1：校验PDF路径和输出目录
-        pdf_path_obj, output_dir_obj = step_1_validate_paths(state)
-
-        # 步骤2：上传PDF至MinerU并轮询解析结果
-        zip_url = step_2_upload_and_poll(pdf_path_obj, output_dir_obj)
-
-        # 步骤3：下载ZIP包并提取MD文件
-        md_path = step_3_download_and_extract(zip_url, output_dir_obj, pdf_path_obj.stem)
-
-        # 更新工作流状态：记录MD文件路径和内容
-        state["md_path"] = md_path
-        logger.info(f"【{func_name}】MD文件生成成功，路径：{md_path}")
-
-        # 读取MD文件内容，捕获异常仅警告不终止
-        try:
-            with open(md_path, "r", encoding="utf-8") as f:
-                state["md_content"] = f.read()
-            logger.debug(f"【{func_name}】MD文件内容读取成功，内容长度：{len(state['md_content'])}字符")
-        except Exception as e:
-            logger.error(f"【{func_name}】读取MD文件内容失败：{str(e)}")
-
-        logger.info(f"【{func_name}】节点执行完成，更新后工作流状态键：{list(state.keys())}")
-
-    except Exception as e:
-        # 异常日志分级，精准提示配置问题
-        logger.error(f"【{func_name}】PDF转MD流程执行失败：{str(e)}", exc_info=True)
-        raise  # 抛出异常，终止工作流
-    finally:
-
-        # 结束：记录节点运行状态
-        add_done_task(state["task_id"], func_name)
-
-        # 节点完成日志，打印当前工作流状态
-        logger.debug(f"【{func_name}】节点执行完成，\n更新后工作流状态：{format_state(state)}")
-
-    return state
-
-def step_1_validate_paths(state: ImportGraphState):
+def step_1_validate_paths(state):
     """
     步骤1：校验PDF文件路径和输出目录
     核心职责：参数非空校验 | PDF文件有效性校验 | 输出目录自动创建
@@ -167,7 +111,7 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
         if put_resp.status_code != 200:
             logger.warning(f"[文件上传] 首次上传失败（状态码：{put_resp.status_code}），强制指定PDF类型重试")
             pdf_headers = {"Content-Type": "application/pdf"}
-            put_resp = upload_session.put(url=signed_url, data=file_data, headers=pdf_headers, timeout=60,proxies=proxies)
+            put_resp = upload_session.put(url=signed_url, data=file_data, headers=pdf_headers, timeout=60)
             # 重试仍失败则抛出异常
             if put_resp.status_code != 200:
                 raise RuntimeError(f"[文件上传] 重试后仍失败，状态码：{put_resp.status_code}，响应内容：{put_resp.text}")
@@ -219,7 +163,6 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
             logger.debug(f"[任务轮询] 结果暂为空，已耗时{int(elapsed_time)}s，继续等待")
             time.sleep(poll_interval)
             continue
-
         # 解析任务状态，分支处理
         result_item = extract_results[0]
         state_status = result_item["state"]
@@ -243,7 +186,6 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
             )
             time.sleep(poll_interval)
 
-
 def step_3_download_and_extract(zip_url: str, output_dir_obj: Path, pdf_stem: str) -> str:
     """
     步骤3：下载MinerU解析结果ZIP包并解压，提取目标MD文件（重命名统一规范）
@@ -256,11 +198,7 @@ def step_3_download_and_extract(zip_url: str, output_dir_obj: Path, pdf_stem: st
 
     # 1. 下载解析结果ZIP包，120秒超时适配大文件
     logger.info(f"[步骤1/4] 开始下载ZIP包，链接：{zip_url}...")
-    download_session = requests.Session()
-    download_session.trust_env = False
-    resp = download_session.get(zip_url, timeout=120)
-
-    # resp = requests.get(zip_url, timeout=120)
+    resp = requests.get(zip_url, timeout=120)
     if resp.status_code != 200:
         raise RuntimeError(f"[步骤1/4] ZIP包下载失败，HTTP状态码：{resp.status_code}")
 
@@ -336,6 +274,62 @@ def step_3_download_and_extract(zip_url: str, output_dir_obj: Path, pdf_stem: st
     logger.info(f"===== [{pdf_stem}]解析结果处理完成，最终MD文件路径：{final_md_path} =====")
     return final_md_path
 
+def node_pdf_to_md(state: ImportGraphState) -> ImportGraphState:
+    """
+    LangGraph工作流节点：PDF转MD核心处理节点
+    核心流程：路径校验 → MinerU上传解析 → 结果下载解压 → 读取MD内容并更新工作流状态
+    参数：state-工作流状态对象，需包含pdf_path/local_dir/task_id
+    返回：更新后的工作流状态，新增md_path/md_content
+    """
+
+    # 动态获取函数名避免硬编码
+    func_name = sys._getframe().f_code.co_name
+
+    # 节点启动日志，打印当前工作流状态
+    logger.debug(f"【{func_name}】节点启动，\n当前工作流状态：{format_state(state)}")
+
+    # 开始：记录节点运行状态
+    add_running_task(state["task_id"], func_name)
+
+
+    try:
+        # 步骤1：校验PDF路径和输出目录
+        pdf_path_obj, output_dir_obj = step_1_validate_paths(state)
+
+        # 步骤2：上传PDF至MinerU并轮询解析结果
+        zip_url = step_2_upload_and_poll(pdf_path_obj, output_dir_obj)
+
+        # 步骤3：下载ZIP包并提取MD文件
+        md_path = step_3_download_and_extract(zip_url, output_dir_obj, pdf_path_obj.stem)
+
+        # 更新工作流状态：记录MD文件路径和内容
+        state["md_path"] = md_path
+        logger.info(f"【{func_name}】MD文件生成成功，路径：{md_path}")
+
+        # 读取MD文件内容，捕获异常仅警告不终止
+        try:
+            with open(md_path, "r", encoding="utf-8") as f:
+                state["md_content"] = f.read()
+            logger.debug(f"【{func_name}】MD文件内容读取成功，内容长度：{len(state['md_content'])}字符")
+        except Exception as e:
+            logger.error(f"【{func_name}】读取MD文件内容失败：{str(e)}")
+
+        logger.info(f"【{func_name}】节点执行完成，更新后工作流状态键：{list(state.keys())}")
+
+    except Exception as e:
+        # 异常日志分级，精准提示配置问题
+        logger.error(f"【{func_name}】PDF转MD流程执行失败：{str(e)}", exc_info=True)
+        raise  # 抛出异常，终止工作流
+    finally:
+
+        # 结束：记录节点运行状态
+        add_done_task(state["task_id"], func_name)
+
+        # 节点完成日志，打印当前工作流状态
+        logger.debug(f"【{func_name}】节点执行完成，\n更新后工作流状态：{format_state(state)}")
+
+    return state
+
 if __name__ == "__main__":
 
     # 单元测试：验证PDF转MD全流程
@@ -344,7 +338,7 @@ if __name__ == "__main__":
     from app.utils.path_util import PROJECT_ROOT
     logger.info(f"测试获取根地址：{PROJECT_ROOT}")
 
-    test_pdf_name = os.path.join("doc", "hl3040网络说明书.pdf")
+    test_pdf_name = os.path.join("doc", "hak180产品安全手册.pdf")
     test_pdf_path = os.path.join(PROJECT_ROOT, test_pdf_name)
 
     # 构造测试状态

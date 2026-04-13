@@ -1,5 +1,4 @@
 # 导入Python内置模块
-import os
 import json
 # 导入MinIO官方Python SDK核心类
 from minio import Minio
@@ -16,7 +15,7 @@ try:
         endpoint=minio_config.endpoint,
         access_key=minio_config.access_key,
         secret_key=minio_config.secret_key,
-        secure=False  # 内网/本地部署用HTTP，公网部署需改为True并配置SSL
+        secure=minio_config.minio_secure  # 按配置决定使用 HTTP 或 HTTPS
     )
     bucket_name = minio_config.bucket_name
 
