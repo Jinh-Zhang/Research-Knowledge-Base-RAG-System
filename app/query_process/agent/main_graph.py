@@ -1,14 +1,14 @@
 from langgraph.graph import StateGraph, END
-from query_process.agent.state import QueryGraphState
+from app.query_process.agent.state import QueryGraphState
 # 导入所有节点函数
-from query_process.nodes.node_item_name_confirm import node_item_name_confirm
-from query_process.nodes.node_query_kg import node_query_kg
-from query_process.nodes.node_answer_output import node_answer_output
-from query_process.nodes.node_rerank import node_rerank
-from query_process.nodes.node_rrf import node_rrf
-from query_process.nodes.node_search_embedding import node_search_embedding
-from query_process.nodes.node_search_embedding_hyde import node_search_embedding_hyde
-from query_process.nodes.node_web_search_mcp import node_web_search_mcp
+from app.query_process.nodes.node_item_name_confirm import node_item_name_confirm
+from app.query_process.nodes.node_query_kg import node_query_kg
+from app.query_process.nodes.node_answer_output import node_answer_output
+from app.query_process.nodes.node_rerank import node_rerank
+from app.query_process.nodes.node_rrf import node_rrf
+from app.query_process.nodes.node_search_embedding import node_search_embedding
+from app.query_process.nodes.node_search_embedding_hyde import node_search_embedding_hyde
+from app.query_process.nodes.node_web_search_mcp import node_web_search_mcp
 
 # 初始化状态图
 builder = StateGraph(QueryGraphState)
@@ -18,7 +18,7 @@ builder.add_node("node_item_name_confirm", node_item_name_confirm) # 确认商�
 builder.add_node("node_multi_search", lambda x: x)                 # 虚拟节点：多路搜索分叉点
 builder.add_node("node_search_embedding", node_search_embedding)   # 向量搜索
 builder.add_node("node_search_embedding_hyde", node_search_embedding_hyde)
-builder.add_node("node_query_kg", node_query_kg)
+# builder.add_node("node_query_kg", node_query_kg)
 builder.add_node("node_web_search_mcp", node_web_search_mcp)
 builder.add_node("node_join", lambda x: {})                        # 虚拟节点：多路搜索合并点
 builder.add_node("node_rrf", node_rrf)                             # 排序
@@ -63,13 +63,13 @@ builder.add_conditional_edges(
 builder.add_edge("node_multi_search", "node_search_embedding")
 builder.add_edge("node_multi_search", "node_search_embedding_hyde")
 builder.add_edge("node_multi_search", "node_web_search_mcp")
-builder.add_edge("node_multi_search", "node_query_kg")
+# builder.add_edge("node_multi_search", "node_query_kg")
 
 # 3. 四路搜索 -> 结果合并
 builder.add_edge("node_search_embedding", "node_join")
 builder.add_edge("node_search_embedding_hyde", "node_join")
 builder.add_edge("node_web_search_mcp", "node_join")
-builder.add_edge("node_query_kg", "node_join")
+# builder.add_edge("node_query_kg", "node_join")
 
 
 # 4. 合并 -> 排序 -> 重排 -> 生成 -> 结束
