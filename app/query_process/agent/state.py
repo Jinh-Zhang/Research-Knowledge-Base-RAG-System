@@ -6,7 +6,9 @@ class QueryGraphState(TypedDict):
     """
     QueryGraphState 定义了整个查询流程中流转的数据结构。
     """
+
     session_id: str  # 会话唯一标识
+    user_id: str  # 当前登录用户唯一标识
     original_query: str  # 用户原始问题
 
     # 检索过程中的中间数据
