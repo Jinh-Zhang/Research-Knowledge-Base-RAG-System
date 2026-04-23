@@ -3,26 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>掌柜智库知识库</title>
+  <title>Paper RAG Research Console</title>
   <style>
     :root{
-      --bg:#f3f5f7;
+      --bg:#eef2f6;
       --panel:#ffffff;
-      --text:#1f2d3d;
-      --muted:#7a869a;
-      --brand:#1aa7ff;
-      --brand2:#5b7cfa;
-      --bubble-user:#1aa7ff;
+      --text:#172033;
+      --muted:#667085;
+      --brand:#0f766e;
+      --brand2:#2563eb;
+      --accent:#b7791f;
+      --bubble-user:#0f766e;
       --bubble-bot:#ffffff;
-      --border:#e6e9ef;
-      --shadow:0 10px 30px rgba(31,45,61,.12);
+      --border:#d9e0ea;
+      --soft:#f7f9fc;
+      --shadow:0 18px 50px rgba(23,32,51,.14);
     }
     *{box-sizing:border-box}
     body{
       margin:0;
       font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, Arial, sans-serif;
-      background: radial-gradient(1200px 600px at 20% 0%, rgba(26,167,255,.18), transparent 60%),
-                  radial-gradient(1000px 500px at 90% 10%, rgba(91,124,250,.18), transparent 55%),
+      background: radial-gradient(1100px 520px at 12% 0%, rgba(15,118,110,.16), transparent 62%),
+                  radial-gradient(900px 520px at 92% 8%, rgba(183,121,31,.13), transparent 58%),
+                  linear-gradient(180deg, #f8fafc, #eef2f6 52%, #e9eef5),
                   var(--bg);
       color:var(--text);
       height:100vh;
@@ -33,11 +36,11 @@
     }
     .app{
       width:100%;
-      max-width:980px;
-      height:min(820px, 92vh);
+      max-width:1320px;
+      height:min(920px, 94vh);
       background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:16px;
+      border:1px solid rgba(217,224,234,.95);
+      border-radius:18px;
       box-shadow:var(--shadow);
       overflow:hidden;
       display:flex;
@@ -47,40 +50,44 @@
       display:flex;
       align-items:center;
       gap:12px;
-      padding:14px 18px;
+      padding:14px 18px 13px;
       border-bottom:1px solid var(--border);
-      background:linear-gradient(90deg, rgba(26,167,255,.10), rgba(91,124,250,.10));
+      background:linear-gradient(90deg, rgba(15,118,110,.10), rgba(37,99,235,.07), rgba(183,121,31,.08));
     }
     .brand{
       display:flex;
       align-items:center;
       gap:10px;
-      min-width:240px;
+      min-width:300px;
     }
     .logo{
-      width:36px;height:36px;border-radius:10px;
-      background:linear-gradient(135deg, var(--brand), var(--brand2));
-      box-shadow:0 8px 18px rgba(26,167,255,.25);
+      width:38px;height:38px;border-radius:8px;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.55) 1px, transparent 1px) 9px 8px / 9px 22px no-repeat,
+        linear-gradient(180deg, rgba(255,255,255,.65) 1px, transparent 1px) 8px 12px / 22px 7px no-repeat,
+        linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow:0 10px 22px rgba(15,118,110,.24);
     }
     .title{
       display:flex;
       flex-direction:column;
       line-height:1.1;
     }
-    .title strong{font-size:14px}
-    .title span{font-size:12px;color:var(--muted);margin-top:3px}
+    .title strong{font-size:15px;letter-spacing:0}
+    .title span{font-size:12px;color:var(--muted);margin-top:4px}
     .top-actions{
       margin-left:auto;
       display:flex;
       gap:10px;
       align-items:center;
+      flex-wrap:wrap;
     }
     .pill{
       font-size:12px;
       color:var(--muted);
       border:1px solid var(--border);
       padding:6px 10px;
-      border-radius:999px;
+      border-radius:8px;
       background:#fff;
     }
     .btn{
@@ -88,18 +95,253 @@
       background:linear-gradient(135deg, var(--brand), var(--brand2));
       color:#fff;
       padding:8px 12px;
-      border-radius:10px;
+      border-radius:8px;
       font-size:12px;
       cursor:pointer;
     }
     .btn:disabled{opacity:.6;cursor:not-allowed}
+    .btn.secondary{
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--border);
+    }
+    .login-shell{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,.38);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:20;
+      padding:18px;
+    }
+    .login-shell.hidden{display:none}
+    .login-card{
+      width:min(100%, 420px);
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius:12px;
+      box-shadow:0 24px 60px rgba(15,23,42,.18);
+      padding:24px;
+    }
+    .login-card h2{
+      margin:0 0 8px;
+      font-size:22px;
+    }
+    .login-card p{
+      margin:0 0 18px;
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.6;
+    }
+    .auth-tabs{
+      display:flex;
+      gap:8px;
+      margin-bottom:14px;
+    }
+    .auth-tab{
+      flex:1;
+      border:1px solid var(--border);
+      background:#f8fafc;
+      border-radius:8px;
+      padding:9px 10px;
+      cursor:pointer;
+      font-size:13px;
+    }
+    .auth-tab.active{
+      background:linear-gradient(135deg, var(--brand), var(--brand2));
+      color:#fff;
+      border-color:transparent;
+    }
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      margin-bottom:12px;
+    }
+    .field label{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .field input{
+      height:42px;
+      border-radius:8px;
+      border:1px solid var(--border);
+      padding:0 12px;
+      font-size:14px;
+      outline:none;
+    }
+    .field input:focus{
+      border-color:rgba(26,167,255,.6);
+      box-shadow:0 0 0 3px rgba(26,167,255,.12);
+    }
+    .auth-submit{
+      width:100%;
+      height:42px;
+      border:none;
+      border-radius:8px;
+      color:#fff;
+      cursor:pointer;
+      background:linear-gradient(135deg, var(--brand), var(--brand2));
+      font-size:14px;
+    }
+    .auth-error{
+      margin-top:12px;
+      color:#d12c4a;
+      font-size:12px;
+      min-height:18px;
+    }
+    .userbox{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:4px 8px;
+      border:1px solid var(--border);
+      border-radius:8px;
+      background:#fff;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .userbox strong{color:var(--text)}
 
     .chat{
       flex:1;
       overflow:auto;
-      padding:16px 14px 10px;
-      background:linear-gradient(180deg, rgba(26,167,255,.05), transparent 40%),
-                 linear-gradient(0deg, rgba(91,124,250,.05), transparent 45%);
+      padding:22px 24px 16px;
+      background:
+        linear-gradient(180deg, rgba(15,118,110,.045), transparent 38%),
+        linear-gradient(0deg, rgba(37,99,235,.035), transparent 48%),
+        #fbfcfe;
+    }
+    .workspace{
+      flex:1;
+      min-height:0;
+      display:flex;
+      background:#fbfcfe;
+    }
+    .sessions{
+      width:260px;
+      border-right:1px solid var(--border);
+      background:linear-gradient(180deg, #f8fafc, #f3f6fa);
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .sessions-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+    }
+    .sessions-head strong{font-size:13px}
+    .session-list{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      overflow:auto;
+      padding-right:2px;
+    }
+    .session-item{
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:8px;
+      padding:9px;
+      cursor:pointer;
+      color:#334155;
+      text-align:left;
+    }
+    .session-item.active{
+      border-color:rgba(15,118,110,.48);
+      box-shadow:0 0 0 3px rgba(15,118,110,.10);
+    }
+    .session-name{
+      font-size:13px;
+      font-weight:600;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .session-meta{
+      margin-top:4px;
+      font-size:11px;
+      color:var(--muted);
+    }
+    .session-actions{
+      display:flex;
+      gap:8px;
+    }
+    .session-actions .btn{
+      flex:1;
+      padding:7px 8px;
+    }
+    .import-panel{
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:8px;
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .import-panel-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+    }
+    .import-panel-head strong{font-size:13px}
+    .import-note{
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.5;
+    }
+    .import-list{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      max-height:180px;
+      overflow:auto;
+    }
+    .import-task{
+      border:1px solid rgba(217,224,234,.9);
+      background:#f8fafc;
+      border-radius:8px;
+      padding:8px;
+    }
+    .import-task-name{
+      font-size:12px;
+      font-weight:600;
+      color:#334155;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+    }
+    .import-task-meta{
+      margin-top:4px;
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.5;
+    }
+    .import-status{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      font-size:11px;
+      padding:3px 7px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:#fff;
+      color:#475569;
+    }
+    .import-status.completed{color:#047857;border-color:rgba(4,120,87,.25);background:#ecfdf5}
+    .import-status.failed{color:#b42318;border-color:rgba(180,35,24,.25);background:#fff1f2}
+    .import-status.processing{color:#1d4ed8;border-color:rgba(29,78,216,.25);background:#eff6ff}
+    .chat-main{
+      flex:1;
+      min-width:0;
+      display:flex;
+      flex-direction:column;
     }
     .dayline{
       text-align:center;
@@ -110,7 +352,7 @@
     .msg{
       display:flex;
       gap:10px;
-      margin:10px 0;
+      margin:12px 0;
       align-items:flex-end;
     }
     .msg.user{justify-content:flex-end}
@@ -125,27 +367,48 @@
       align-items:flex-end;
     }
     .avatar{
-      width:34px;height:34px;border-radius:10px;
-      background:#e9eef7;
+      width:34px;height:34px;border-radius:8px;
+      background:#e8edf4;
       display:flex;align-items:center;justify-content:center;
       font-size:14px;
       color:#3b4a5a;
       flex:0 0 auto;
     }
-    .avatar.bot{background:linear-gradient(135deg, rgba(26,167,255,.18), rgba(91,124,250,.18))}
+    .avatar.bot{background:linear-gradient(135deg, rgba(15,118,110,.16), rgba(37,99,235,.14));font-size:12px;font-weight:700}
     .bubble{
-      max-width:min(720px, 76%);
+      max-width:min(960px, 88%);
+      min-width:min(260px, 100%);
       display:inline-block;
-      border-radius:14px;
-      padding:10px 12px;
+      border-radius:10px;
+      padding:14px 16px;
       border:1px solid var(--border);
       background:var(--bubble-bot);
       position:relative;
-      line-height:1.55;
-      font-size:14px;
+      line-height:1.7;
+      font-size:15px;
       white-space:pre-wrap;
       overflow-wrap: break-word;
     }
+    .msg.bot .bubble{box-shadow:0 8px 24px rgba(23,32,51,.06)}
+    .answer-text table{
+      width:100%;
+      border-collapse:collapse;
+      margin:10px 0;
+      font-size:14px;
+      white-space:normal;
+    }
+    .answer-text th,
+    .answer-text td{
+      border:1px solid var(--border);
+      padding:6px 8px;
+      text-align:left;
+      vertical-align:top;
+    }
+    .answer-text th{
+      background:#f7f9fc;
+      font-weight:700;
+    }
+    .answer-text strong{font-weight:700}
     .msg.user .bubble{
       background:var(--bubble-user);
       color:#fff;
@@ -174,27 +437,53 @@
     .progress li{margin:4px 0;font-size:12px;color:#56657a}
 
     .answer-images{
-      margin-top:10px;
+      margin-top:14px;
       display:flex;
       flex-direction:column;
-      gap:10px;
+      gap:14px;
+    }
+    .answer-image-card{
+      width:min(100%, 860px);
+      padding:12px;
+      border-radius:8px;
+      border:1px solid rgba(122,134,154,.22);
+      background:linear-gradient(180deg, rgba(247,249,252,.96), rgba(255,255,255,.98));
+      box-shadow:0 12px 28px rgba(31,45,61,.08);
     }
     .answer-images img{
       display: block;
-      max-width: min(100%, 600px);
-      max-height: 600px;
-      width: auto;
-      height: auto;
-      border-radius:12px;
+      width:100%;
+      max-width:100%;
+      max-height:min(68vh, 720px);
+      height:auto;
+      object-fit:contain;
+      border-radius:8px;
       border:1px solid var(--border);
       box-shadow:0 10px 24px rgba(31,45,61,.10);
-      background:#fff;
+      background:#f8fafc;
     }
     .answer-images a{
       font-size:12px;
       color:var(--muted);
       text-decoration:none;
       word-break:break-all;
+      display:inline-block;
+      margin-top:8px;
+    }
+    .answer-images a:hover{
+      color:var(--brand2);
+      text-decoration:underline;
+    }
+    .answer-image-meta{
+      margin-top:8px;
+      font-size:12px;
+      color:#334155;
+      line-height:1.5;
+      word-break:break-word;
+    }
+    .answer-image-caption{
+      font-weight:600;
+      color:#1f2937;
     }
 
     .typing{
@@ -214,11 +503,11 @@
 
     .composer{
       border-top:1px solid var(--border);
-      padding:12px 14px;
+      padding:12px 16px;
       display:flex;
       gap:10px;
       align-items:flex-end;
-      background:#fff;
+      background:linear-gradient(180deg, #fff, #f8fafc);
     }
     textarea{
       flex:1;
@@ -226,18 +515,18 @@
       min-height:44px;
       max-height:140px;
       padding:10px 12px;
-      border-radius:12px;
+      border-radius:8px;
       border:1px solid var(--border);
       outline:none;
       font-size:14px;
       line-height:1.5;
     }
-    textarea:focus{border-color:rgba(26,167,255,.6); box-shadow:0 0 0 3px rgba(26,167,255,.12)}
+    textarea:focus{border-color:rgba(15,118,110,.62); box-shadow:0 0 0 3px rgba(15,118,110,.12)}
     .send{
       width:88px;
       height:44px;
       border:none;
-      border-radius:12px;
+      border-radius:8px;
       cursor:pointer;
       font-size:14px;
       color:#fff;
@@ -248,7 +537,40 @@
       padding:0 14px 12px;
       color:var(--muted);
       font-size:12px;
-      background:#fff;
+      background:#f8fafc;
+    }
+    @media (max-width: 900px){
+      body{padding:10px}
+      .app{
+        max-width:none;
+        height:96vh;
+      }
+      .topbar,
+      .chat,
+      .composer,
+      .hint{
+        padding-left:12px;
+        padding-right:12px;
+      }
+      .workspace{flex-direction:column}
+      .sessions{
+        width:100%;
+        max-height:180px;
+        border-right:none;
+        border-bottom:1px solid var(--border);
+      }
+      .bubble{
+        max-width:100%;
+        min-width:0;
+        padding:12px 14px;
+      }
+      .answer-image-card{
+        width:100%;
+        padding:10px;
+      }
+      .answer-images img{
+        max-height:52vh;
+      }
     }
     .kbd{
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -266,52 +588,299 @@
       <div class="brand">
         <div class="logo"></div>
         <div class="title">
-          <strong>掌柜智库知识库</strong>
-          <span id="subTitle">在线 · 可查询知识库与联网信息</span>
+          <strong>Paper RAG Research Console</strong>
+          <span id="subTitle">论文切片 · 表格/图示 · 证据问答</span>
         </div>
       </div>
       <div class="top-actions">
+        <div class="userbox"><span>Researcher</span><strong id="currentUser">未登录</strong></div>
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;color:var(--muted);margin-right:10px;">
-          <input type="checkbox" id="streamToggle" checked> 流式输出
+          <input type="checkbox" id="streamToggle" checked> Stream
         </label>
         <span class="pill" id="apiPill">API: 未连接</span>
-        <button class="btn" id="btnClear">清空对话</button>
+        <span class="pill" id="importPill">Import: 未检测</span>
+        <button class="btn secondary" id="btnUploadPaper" type="button">上传论文</button>
+        <input id="fileUploadInput" type="file" accept=".pdf,.md,.markdown" multiple hidden>
+        <button class="btn secondary" id="btnNewSession">新会话</button>
+        <button class="btn" id="btnClear">删除当前对话</button>
+        <button class="btn secondary" id="btnLogout">退出登录</button>
       </div>
     </div>
 
-    <div class="chat" id="chat">
-      <div class="dayline">今天</div>
-      <div class="msg bot">
-        <div class="avatar bot">掌柜智库</div>
-        <div>
-          <div class="bubble">你好，我是掌柜智库知识库客服。你可以直接提问，我会在“阶段进度”里展示处理过程。</div>
-          <div class="meta">提示：可以问“如何使用万用表测量电压？”</div>
+    <div class="workspace">
+      <aside class="sessions">
+        <div class="sessions-head">
+          <strong>会话列表</strong>
         </div>
-      </div>
-    </div>
+        <div class="session-actions">
+          <button class="btn" id="btnCreateSession" type="button">新会话</button>
+          <button class="btn secondary" id="btnRenameSession" type="button">重命名</button>
+        </div>
+        <div class="session-list" id="sessionList"></div>
+        <div class="import-panel">
+          <div class="import-panel-head">
+            <strong>论文导入</strong>
+            <button class="btn secondary" id="btnUploadPaperSide" type="button">上传</button>
+          </div>
+          <div class="import-note">支持 PDF / Markdown。导入完成后，可直接在右侧对话中询问这篇论文。</div>
+          <div class="import-list" id="importTaskList">
+            <div class="session-meta">暂无导入任务</div>
+          </div>
+        </div>
+      </aside>
+      <main class="chat-main">
+        <div class="chat" id="chat">
+          <div class="dayline">今天</div>
+          <div class="msg bot">
+              <div class="avatar bot">RAG</div>
+              <div>
+              <div class="bubble">
+                你好，我可以基于已导入论文回答问题，整理实验表格，解释 Figure/Table，并在需要时附上原文图片。
+              </div>
+              <div class="meta">可以询问论文方法、实验结果、指定 Table/Figure、消融分析、结论依据或局限性。</div>
+            </div>
+          </div>
+        </div>
 
-    <div class="composer">
-      <textarea id="input" placeholder="请输入问题（Enter 发送，Shift+Enter 换行）"></textarea>
-      <button class="send" id="send">发送</button>
+        <div class="composer">
+          <textarea id="input" placeholder="询问论文方法、实验表格、Figure 内容或结论依据..."></textarea>
+          <button class="send" id="send">提问</button>
+        </div>
+        <div class="hint">当前会话会保留论文标题识别、检索切片、表格和图示输出。</div>
+      </main>
     </div>
-    <div class="hint">快捷键：<span class="kbd">Enter</span> 发送，<span class="kbd">Shift</span>+<span class="kbd">Enter</span> 换行</div>
+  </div>
+
+  <div class="login-shell hidden" id="loginShell">
+    <div class="login-card">
+      <h2>进入研究会话</h2>
+      <p>登录后会按账号保存论文问答历史，便于继续追问同一篇论文。</p>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabLogin" type="button">登录</button>
+        <button class="auth-tab" id="tabRegister" type="button">注册</button>
+      </div>
+      <div class="field">
+        <label for="authUsername">用户名</label>
+        <input id="authUsername" type="text" autocomplete="username" placeholder="请输入用户名">
+      </div>
+      <div class="field">
+        <label for="authPassword">密码</label>
+        <input id="authPassword" type="password" autocomplete="current-password" placeholder="请输入密码，至少6位">
+      </div>
+      <button class="auth-submit" id="authSubmit" type="button">登录</button>
+      <div class="auth-error" id="authError"></div>
+    </div>
   </div>
 
   <script>
     // 默认同源；如你把页面单独打开（file://），可改成 http://127.0.0.1:8001
     const API_BASE = `${location.protocol}//${location.host}`.includes('http') ? `${location.protocol}//${location.host}` : 'http://127.0.0.1:8001';
+    const IMPORT_API_BASE = location.protocol.startsWith('http')
+      ? `${location.protocol}//${location.hostname || '127.0.0.1'}:8000`
+      : 'http://127.0.0.1:8000';
     const chatEl = document.getElementById('chat');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('send');
     const apiPill = document.getElementById('apiPill');
+    const importPill = document.getElementById('importPill');
+    const btnUploadPaper = document.getElementById('btnUploadPaper');
+    const btnUploadPaperSide = document.getElementById('btnUploadPaperSide');
+    const fileUploadInput = document.getElementById('fileUploadInput');
+    const importTaskListEl = document.getElementById('importTaskList');
     const btnClear = document.getElementById('btnClear');
+    const btnNewSession = document.getElementById('btnNewSession');
+    const btnCreateSession = document.getElementById('btnCreateSession');
+    const btnRenameSession = document.getElementById('btnRenameSession');
+    const sessionListEl = document.getElementById('sessionList');
+    const btnLogout = document.getElementById('btnLogout');
     const streamToggle = document.getElementById('streamToggle');
+    const currentUserEl = document.getElementById('currentUser');
+    const loginShell = document.getElementById('loginShell');
+    const tabLogin = document.getElementById('tabLogin');
+    const tabRegister = document.getElementById('tabRegister');
+    const authSubmit = document.getElementById('authSubmit');
+    const authUsername = document.getElementById('authUsername');
+    const authPassword = document.getElementById('authPassword');
+    const authError = document.getElementById('authError');
 
-    // Session ID Logic
-    let sessionId = localStorage.getItem('kb_session_id');
-    if (!sessionId) {
-      sessionId = 'sess-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem('kb_session_id', sessionId);
+    let authMode = 'login';
+    let currentUser = null;
+    let sessionId = '';
+    let sessions = [];
+    let importTasks = [];
+    let sessionToken = localStorage.getItem('kb_auth_token') || '';
+
+    function authHeaders(extra = {}){
+      const headers = { ...extra };
+      if(sessionToken){
+        headers.Authorization = `Bearer ${sessionToken}`;
+      }
+      return headers;
+    }
+
+    function sessionStorageKey(userId){
+      return `kb_session_id_${userId}`;
+    }
+
+    function createSessionId(){
+      return 'sess-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+
+    function ensureSessionId(){
+      if(!currentUser || !currentUser.user_id) return '';
+      const key = sessionStorageKey(currentUser.user_id);
+      let value = localStorage.getItem(key);
+      if(!value){
+        value = createSessionId();
+        localStorage.setItem(key, value);
+      }
+      sessionId = value;
+      return sessionId;
+    }
+
+    function sessionDisplayTime(ts){
+      if(!ts) return '';
+      const d = new Date(Number(ts) * 1000);
+      if(Number.isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('zh-CN', {month:'2-digit', day:'2-digit'}) + ' ' + d.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+    }
+
+    function renderSessionList(){
+      if(!sessionListEl) return;
+      sessionListEl.innerHTML = '';
+      if(!sessions.length){
+        sessionListEl.innerHTML = '<div class="session-meta">暂无历史会话</div>';
+        return;
+      }
+      for(const item of sessions){
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'session-item' + (item.session_id === sessionId ? ' active' : '');
+        btn.dataset.sessionId = item.session_id;
+        btn.innerHTML = `
+          <div class="session-name">${escapeHtml(item.session_name || '未命名会话')}</div>
+          <div class="session-meta">${escapeHtml(sessionDisplayTime(item.updated_at) || '未开始')}</div>
+        `;
+        sessionListEl.appendChild(btn);
+      }
+    }
+
+    async function loadSessions(){
+      if(!currentUser) {
+        sessions = [];
+        renderSessionList();
+        return;
+      }
+      try{
+        const res = await fetch(`${API_BASE}/sessions`, { credentials: 'include', headers: authHeaders() });
+        if(!res.ok) return;
+        const data = await res.json();
+        sessions = Array.isArray(data.items) ? data.items : [];
+        renderSessionList();
+      }catch(_){}
+    }
+
+    async function createNamedSession(){
+      if(!currentUser){
+        setLoginVisible(true);
+        return;
+      }
+      const data = await fetchJson(`${API_BASE}/sessions`, {
+        method: 'POST',
+        body: JSON.stringify({ session_name: '' })
+      });
+      sessionId = data.session_id;
+      localStorage.setItem(sessionStorageKey(currentUser.user_id), sessionId);
+      resetChatToWelcome();
+      await loadSessions();
+      inputEl.focus();
+    }
+
+    async function renameCurrentSession(){
+      if(!currentUser || !sessionId){
+        setLoginVisible(true);
+        return;
+      }
+      const current = sessions.find(s => s.session_id === sessionId);
+      const name = (prompt('请输入新的会话名称', current?.session_name || '未命名会话') || '').trim();
+      if(!name) return;
+      await fetchJson(`${API_BASE}/sessions/${sessionId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ session_name: name })
+      });
+      await loadSessions();
+    }
+
+    async function switchSession(nextSessionId){
+      if(!currentUser || !nextSessionId || nextSessionId === sessionId) return;
+      sessionId = nextSessionId;
+      localStorage.setItem(sessionStorageKey(currentUser.user_id), sessionId);
+      resetChatToWelcome();
+      renderSessionList();
+      await loadHistory();
+      inputEl.focus();
+    }
+
+    function resetChatToWelcome(){
+      const nodes = Array.from(chatEl.querySelectorAll('.msg'));
+      for(let i=1;i<nodes.length;i++) nodes[i].remove();
+      scrollToBottom();
+    }
+
+    function setAuthMode(mode){
+      authMode = mode === 'register' ? 'register' : 'login';
+      tabLogin.classList.toggle('active', authMode === 'login');
+      tabRegister.classList.toggle('active', authMode === 'register');
+      authSubmit.textContent = authMode === 'login' ? '登录' : '注册并登录';
+      authError.textContent = '';
+    }
+
+    function setLoginVisible(visible){
+      loginShell.classList.toggle('hidden', !visible);
+      if(visible){
+        setTimeout(() => authUsername.focus(), 50);
+      }
+    }
+
+    async function fetchJson(url, options = {}){
+      const res = await fetch(url, {
+        credentials: 'include',
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders(),
+          ...(options.headers || {})
+        }
+      });
+      let data = null;
+      try{
+        data = await res.json();
+      }catch(_){
+        data = null;
+      }
+      if(!res.ok){
+        const message = data && data.detail ? data.detail : `请求失败(${res.status})`;
+        throw new Error(message);
+      }
+      return data;
+    }
+
+    async function ensureAuth(){
+      try{
+        const data = await fetchJson(`${API_BASE}/auth/me`, { method: 'GET' });
+        currentUser = data.user || null;
+        currentUserEl.textContent = currentUser && currentUser.username ? currentUser.username : '未登录';
+        setLoginVisible(!currentUser);
+        if(currentUser){
+          ensureSessionId();
+        }
+        return currentUser;
+      }catch(_){
+        currentUser = null;
+        currentUserEl.textContent = '未登录';
+        setLoginVisible(true);
+        return null;
+      }
     }
 
     function scrollToBottom(){
@@ -334,6 +903,190 @@
         .replaceAll('>','&gt;')
         .replaceAll('"','&quot;')
         .replaceAll("'","&#039;");
+    }
+
+    function importStatusLabel(status){
+      const map = {
+        pending: '等待中',
+        processing: '导入中',
+        completed: '已完成',
+        failed: '失败'
+      };
+      return map[status] || status || '未知';
+    }
+
+    function renderImportTasks(){
+      if(!importTaskListEl) return;
+      importTaskListEl.innerHTML = '';
+      if(!importTasks.length){
+        importTaskListEl.innerHTML = '<div class="session-meta">暂无导入任务</div>';
+        return;
+      }
+      for(const task of importTasks){
+        const done = Array.isArray(task.done_list) ? task.done_list : [];
+        const running = Array.isArray(task.running_list) ? task.running_list : [];
+        const item = document.createElement('div');
+        item.className = 'import-task';
+        item.innerHTML = `
+          <div class="import-task-name" title="${escapeHtml(task.name || task.task_id)}">${escapeHtml(task.name || task.task_id)}</div>
+          <div class="import-task-meta">
+            <span class="import-status ${escapeHtml(task.status || 'pending')}">${escapeHtml(importStatusLabel(task.status))}</span>
+            <div>已完成 ${done.length} 项，进行中 ${running.length} 项</div>
+            ${task.error ? `<div>${escapeHtml(task.error)}</div>` : ''}
+          </div>
+        `;
+        importTaskListEl.appendChild(item);
+      }
+    }
+
+    function upsertImportTask(nextTask){
+      const idx = importTasks.findIndex(x => x.task_id === nextTask.task_id);
+      if(idx >= 0){
+        importTasks[idx] = { ...importTasks[idx], ...nextTask };
+      }else{
+        importTasks.unshift(nextTask);
+      }
+      renderImportTasks();
+    }
+
+    async function uploadPapers(files){
+      const selected = Array.from(files || []).filter(Boolean);
+      if(!selected.length) return;
+
+      const formData = new FormData();
+      for(const file of selected){
+        formData.append('files', file);
+      }
+
+      btnUploadPaper.disabled = true;
+      if(btnUploadPaperSide) btnUploadPaperSide.disabled = true;
+      importPill.textContent = 'Import: 上传中';
+
+      try{
+        const res = await fetch(`${IMPORT_API_BASE}/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json().catch(() => null);
+        if(!res.ok){
+          throw new Error((data && data.detail) || `上传失败(${res.status})`);
+        }
+        const taskIds = Array.isArray(data.task_ids) ? data.task_ids : [];
+        taskIds.forEach((taskId, idx) => {
+          const file = selected[idx] || selected[0];
+          upsertImportTask({
+            task_id: taskId,
+            name: file ? file.name : taskId,
+            status: 'pending',
+            done_list: [],
+            running_list: []
+          });
+          pollImportTask(taskId);
+        });
+        importPill.textContent = `Import: 已提交 ${taskIds.length} 个任务`;
+      }catch(e){
+        importPill.textContent = 'Import: 上传失败';
+        upsertImportTask({
+          task_id: `upload-error-${Date.now()}`,
+          name: selected.map(f => f.name).join(', '),
+          status: 'failed',
+          error: e.message || String(e),
+          done_list: [],
+          running_list: []
+        });
+      }finally{
+        btnUploadPaper.disabled = false;
+        if(btnUploadPaperSide) btnUploadPaperSide.disabled = false;
+        fileUploadInput.value = '';
+      }
+    }
+
+    async function pollImportTask(taskId){
+      const timer = setInterval(async () => {
+        try{
+          const res = await fetch(`${IMPORT_API_BASE}/status/${taskId}`);
+          const data = await res.json();
+          upsertImportTask({
+            task_id: taskId,
+            status: data.status || 'pending',
+            done_list: data.done_list || [],
+            running_list: data.running_list || []
+          });
+          if(data.status === 'completed' || data.status === 'failed'){
+            clearInterval(timer);
+            importPill.textContent = data.status === 'completed' ? 'Import: 导入完成' : 'Import: 导入失败';
+          }
+        }catch(e){
+          upsertImportTask({
+            task_id: taskId,
+            status: 'failed',
+            error: e.message || String(e)
+          });
+          importPill.textContent = 'Import: 状态获取失败';
+          clearInterval(timer);
+        }
+      }, 1500);
+    }
+
+    function renderInlineMarkdown(text){
+      return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    }
+
+    function isMarkdownTableSeparator(line){
+      const cells = String(line || '').trim().split('|').map(c => c.trim()).filter(Boolean);
+      return cells.length > 0 && cells.every(c => /^:?-{3,}:?$/.test(c));
+    }
+
+    function parseMarkdownTable(lines, start){
+      if(start + 1 >= lines.length || !String(lines[start]).includes('|') || !isMarkdownTableSeparator(lines[start + 1])){
+        return null;
+      }
+      const parseRow = (line) => {
+        let raw = String(line || '').trim();
+        if(raw.startsWith('|')) raw = raw.slice(1);
+        if(raw.endsWith('|')) raw = raw.slice(0, -1);
+        return raw.split('|').map(c => c.trim());
+      };
+      const header = parseRow(lines[start]);
+      const rows = [];
+      let idx = start + 2;
+      while(idx < lines.length && String(lines[idx]).includes('|') && String(lines[idx]).trim()){
+        rows.push(parseRow(lines[idx]));
+        idx++;
+      }
+      if(!header.length || !rows.length) return null;
+      return { header, rows, nextIndex: idx };
+    }
+
+    function markdownToHtml(markdown){
+      const lines = String(markdown || '').split(/\r?\n/);
+      const html = [];
+      let para = [];
+      const flushPara = () => {
+        if(!para.length) return;
+        html.push(`<p>${renderInlineMarkdown(para.join('\n')).replace(/\n/g, '<br>')}</p>`);
+        para = [];
+      };
+
+      for(let i = 0; i < lines.length; i++){
+        const table = parseMarkdownTable(lines, i);
+        if(table){
+          flushPara();
+          const head = table.header.map(c => `<th>${renderInlineMarkdown(c)}</th>`).join('');
+          const body = table.rows.map(row => `<tr>${row.map(c => `<td>${renderInlineMarkdown(c)}</td>`).join('')}</tr>`).join('');
+          html.push(`<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`);
+          i = table.nextIndex - 1;
+          continue;
+        }
+
+        if(!String(lines[i]).trim()){
+          flushPara();
+          continue;
+        }
+        para.push(lines[i]);
+      }
+      flushPara();
+      return html.join('');
     }
 
     function isImageUrl(url){
@@ -454,11 +1207,39 @@
       return keywords.some(k => t.includes(k));
     }
 
-    function renderAnswerWithImages(containerEl, answerText, candidateImageUrls){
+    function normalizeImageInfo(info){
+      if(!info || typeof info !== 'object') return null;
+      const url = normalizeUrl(info.image_url || info.url || '');
+      if(!isImageUrl(url)) return null;
+      const figureId = info.figure_id || '';
+      let caption = info.caption || '';
+      if(caption){
+        caption = String(caption).replace(/^\s*(Figure|Fig\.?)\s*[A-Za-z0-9_.-]+\s*[:：]\s*/i, '');
+      }
+      return {
+        ...info,
+        image_url: url,
+        figure_id: figureId,
+        caption,
+        source: info.source || '',
+        chunk_id: info.chunk_id || '',
+        title: info.title || '',
+        doc_rank: info.doc_rank || ''
+      };
+    }
+
+    function renderAnswerWithImages(containerEl, answerText, candidateImageUrls, candidateImageInfos){
       const { text, images: imagesFromBlock } = parseAnswerAndImages(answerText);
       const candidates = Array.isArray(candidateImageUrls)
         ? candidateImageUrls.map(normalizeUrl).filter(isImageUrl)
         : [];
+      const infoByUrl = new Map();
+      if(Array.isArray(candidateImageInfos)){
+        for(const rawInfo of candidateImageInfos){
+          const info = normalizeImageInfo(rawInfo);
+          if(info && !infoByUrl.has(info.image_url)) infoByUrl.set(info.image_url, info);
+        }
+      }
       const hasBlockImages = imagesFromBlock && imagesFromBlock.length > 0;
       
       // 使用宽松提取
@@ -482,7 +1263,7 @@
       if((text || '').trim().length > 0){
         const textEl = document.createElement('div');
         textEl.className = 'answer-text';
-        textEl.textContent = text;
+        textEl.innerHTML = markdownToHtml(text);
         containerEl.appendChild(textEl);
       }else{
         const textEl = document.createElement('div');
@@ -496,22 +1277,36 @@
         imgWrap.className = 'answer-images';
         for(const url of images){
           const safeUrl = normalizeUrl(url);
+          const info = infoByUrl.get(safeUrl);
+          const card = document.createElement('div');
+          card.className = 'answer-image-card';
           const img = document.createElement('img');
           img.loading = 'lazy';
           img.src = safeUrl;
           img.alt = '参考图片';
           img.referrerPolicy = 'no-referrer';
           img.addEventListener('error', () => {
-            img.style.display = 'none';
+            card.style.display = 'none';
           });
-          imgWrap.appendChild(img);
+          card.appendChild(img);
+
+          if(info && (info.figure_id || info.caption || info.title)){
+            const meta = document.createElement('div');
+            meta.className = 'answer-image-meta';
+            const figureLabel = info.figure_id ? `Figure ${escapeHtml(info.figure_id)}` : '';
+            const sourceTitle = info.title ? escapeHtml(info.title) : '';
+            const captionText = `${figureLabel}${info.caption ? `${figureLabel ? '：' : ''}${escapeHtml(info.caption)}` : ''}`;
+            meta.innerHTML = `${captionText ? `<div class="answer-image-caption">${captionText}</div>` : ''}${sourceTitle ? `<div>来源：${sourceTitle}</div>` : ''}`;
+            card.appendChild(meta);
+          }
 
           const link = document.createElement('a');
           link.href = safeUrl;
           link.target = '_blank';
           link.rel = 'noopener noreferrer';
-          link.textContent = url;
-          imgWrap.appendChild(link);
+          link.textContent = '查看原图';
+          card.appendChild(link);
+          imgWrap.appendChild(card);
         }
         containerEl.appendChild(imgWrap);
       }
@@ -545,11 +1340,11 @@
       scrollToBottom();
     }
 
-    function addBotMsgWithTime(text, ts, imageUrls){
+    function addBotMsgWithTime(text, ts, imageUrls, imageInfos){
       const id = 'bot-his-' + Math.random().toString(36).slice(2);
       const html = `
         <div class="msg bot" id="${id}">
-          <div class="avatar bot">掌柜智库</div>
+          <div class="avatar bot">RAG</div>
           <div>
             <div class="bubble"><div class="answer"></div></div>
             <div class="meta">${formatTime(ts)}</div>
@@ -560,7 +1355,7 @@
       const el = document.getElementById(id);
       if(el){
         const answerEl = el.querySelector('.answer');
-        renderAnswerWithImages(answerEl, text || '', imageUrls || []);
+        renderAnswerWithImages(answerEl, text || '', imageUrls || [], imageInfos || []);
       }
       scrollToBottom();
     }
@@ -569,7 +1364,7 @@
       const id = 'bot-' + Math.random().toString(36).slice(2);
       const html = `
         <div class="msg bot" id="${id}">
-          <div class="avatar bot">掌柜智库</div>
+          <div class="avatar bot">RAG</div>
           <div style="min-width: 180px;">
             <div class="bubble">
               <span class="typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
@@ -620,7 +1415,7 @@
       }
     }
 
-    function finalizeBotAnswer(botMsgEl, answer, error, imageUrls){
+    function finalizeBotAnswer(botMsgEl, answer, error, imageUrls, imageInfos){
       const bubble = botMsgEl.querySelector('.bubble');
       const progress = botMsgEl.querySelector('details.progress');
       const err = (error || '').trim();
@@ -649,23 +1444,43 @@
       const answerEl = document.createElement('div');
       answerEl.className = 'answer';
       bubble.appendChild(answerEl);
-      renderAnswerWithImages(answerEl, answer || '', imageUrls || []);
+      renderAnswerWithImages(answerEl, answer || '', imageUrls || [], imageInfos || []);
       if(progressEl) bubble.appendChild(progressEl);
     }
 
     async function apiHealth(){
       try{
-        const res = await fetch(`${API_BASE}/health`);
+        const res = await fetch(`${API_BASE}/health`, { credentials: 'include', headers: authHeaders() });
         if(!res.ok) throw new Error('health not ok');
         apiPill.textContent = `API: 已连接`;
       }catch(e){
         apiPill.textContent = `API: 未连接`;
       }
+      try{
+        const res = await fetch(`${IMPORT_API_BASE}/health`);
+        if(!res.ok){
+          const fallback = await fetch(`${IMPORT_API_BASE}/status/__health_probe__`);
+          if(!fallback.ok) throw new Error('import not ok');
+        }
+        const hasActiveImport = importTasks.some(x => x.status === 'processing' || x.status === 'pending');
+        importPill.textContent = hasActiveImport || importPill.textContent.includes('导入') || importPill.textContent.includes('上传')
+          ? importPill.textContent
+          : 'Import: 已连接';
+      }catch(e){
+        if(!importTasks.some(x => x.status === 'processing' || x.status === 'pending')){
+          importPill.textContent = 'Import: 未连接';
+        }
+      }
     }
 
     async function loadHistory(){
+      if(!currentUser){
+        resetChatToWelcome();
+        return;
+      }
       try{
-        const res = await fetch(`${API_BASE}/history/${sessionId}`);
+        ensureSessionId();
+        const res = await fetch(`${API_BASE}/history/${sessionId}`, { credentials: 'include', headers: authHeaders() });
         if(!res.ok) return;
         const data = await res.json();
         const items = Array.isArray(data.items) ? data.items : [];
@@ -677,7 +1492,7 @@
           if(item.role === 'user'){
             addUserMsgWithTime(item.text || '', item.ts);
           }else{
-            addBotMsgWithTime(item.text || '', item.ts, item.image_urls || []);
+            addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [], item.image_infos || []);
           }
         }
         scrollToBottom();
@@ -688,7 +1503,8 @@
       const isStream = streamToggle.checked;
       const res = await fetch(`${API_BASE}/query`, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        credentials: 'include',
+        headers: authHeaders({'Content-Type':'application/json'}),
         body: JSON.stringify({
           query: text,
           session_id: sessionId,
@@ -706,20 +1522,22 @@
       const typing = botMsgEl.querySelector('.typing');
       const interval = setInterval(async () => {
         try{
-          const res = await fetch(`${API_BASE}/status/${taskId}`);
+          const res = await fetch(`${API_BASE}/status/${taskId}`, { credentials: 'include', headers: authHeaders() });
           const data = await res.json();
           renderProgress(botMsgEl, data.done_list, data.running_list, data.status);
 
           if(data.status === 'completed'){
             if(typing) typing.remove();
-            finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || []);
+            finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [], data.image_infos || []);
             clearInterval(interval);
             sendBtn.disabled = false;
+            loadSessions();
           }else if(data.status === 'failed'){
             if(typing) typing.remove();
-            finalizeBotAnswer(botMsgEl, data.answer, data.error || 'failed', data.image_urls || []);
+            finalizeBotAnswer(botMsgEl, data.answer, data.error || 'failed', data.image_urls || [], data.image_infos || []);
             clearInterval(interval);
             sendBtn.disabled = false;
+            loadSessions();
           }
         }catch(e){
           // 轮询错误不立刻终止，让用户稍后重试
@@ -729,6 +1547,10 @@
 
     async function onSend(){
       console.log('[perf] A onSend start', performance.now());
+      if(!currentUser){
+        setLoginVisible(true);
+        return;
+      }
       const text = (inputEl.value || '').trim();
       if(!text) return;
       inputEl.value = '';
@@ -749,7 +1571,7 @@
           // 非流式：直接拿到结果
           // data: { session_id, answer, done_list, error, message }
           renderProgress(botMsgEl, data.done_list || [], [], 'completed');
-          finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || []);
+          finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [], data.image_infos || []);
           sendBtn.disabled = false;
           return;
         }
@@ -768,6 +1590,47 @@
         const es = new EventSource(`${API_BASE}/stream/${session_id}`);
         console.log('[perf] C EventSource created', performance.now(), { session_id });
         let rawAnswerText = '';
+        let displayedAnswerText = '';
+        let pendingAnswerText = '';
+        let typeTimer = null;
+        let finalPayload = null;
+
+        const renderDisplayedAnswer = (imageUrls = [], imageInfos = []) => {
+          renderAnswerWithImages(answerEl, displayedAnswerText, imageUrls, imageInfos);
+          scrollToBottom();
+        };
+
+        const startTypewriter = () => {
+          if(typeTimer) return;
+          typeTimer = setInterval(() => {
+            if(!pendingAnswerText){
+              clearInterval(typeTimer);
+              typeTimer = null;
+              if(finalPayload){
+                renderAnswerWithImages(
+                  answerEl,
+                  displayedAnswerText,
+                  finalPayload.image_urls || [],
+                  finalPayload.image_infos || []
+                );
+                finalPayload = null;
+                scrollToBottom();
+              }
+              return;
+            }
+
+            const step = Math.min(4, pendingAnswerText.length);
+            displayedAnswerText += pendingAnswerText.slice(0, step);
+            pendingAnswerText = pendingAnswerText.slice(step);
+            renderDisplayedAnswer();
+          }, 18);
+        };
+
+        const appendTypewriterText = (text) => {
+          if(!text) return;
+          pendingAnswerText += text;
+          startTypewriter();
+        };
 
         es.addEventListener('progress', (e) => {
           try{
@@ -789,9 +1652,7 @@
             const delta = d.delta || '';
             if(delta){
               rawAnswerText += delta;
-              // 即使后端未发送 final，也尽可能在流式过程中渲染图片
-              renderAnswerWithImages(answerEl, rawAnswerText, []);
-              scrollToBottom();
+              appendTypewriterText(delta);
             }
           }catch(_){}
         });
@@ -807,10 +1668,19 @@
             const d = JSON.parse(e.data || '{}');
             // 流式 delta 可能不包含“【图片】/图片列表”，最终包的 d.answer 才是完整答案；优先使用 d.answer
             const finalText = (d && typeof d.answer === 'string' && d.answer.trim().length > 0) ? d.answer : (rawAnswerText || answerEl.textContent || '');
-            renderAnswerWithImages(answerEl, finalText, d.image_urls || []);
+            const alreadyShown = displayedAnswerText + pendingAnswerText;
+            if(finalText.startsWith(alreadyShown)){
+              pendingAnswerText += finalText.slice(alreadyShown.length);
+            }else{
+              displayedAnswerText = '';
+              pendingAnswerText = finalText;
+            }
+            finalPayload = d || {};
+            startTypewriter();
           }catch(_){}
           es.close();
           sendBtn.disabled = false;
+          loadSessions();
         });
 
         es.addEventListener('final_answer', (e) => {
@@ -823,10 +1693,19 @@
           try{
             const d = JSON.parse(e.data || '{}');
             const finalText = (d && typeof d.answer === 'string' && d.answer.trim().length > 0) ? d.answer : (rawAnswerText || answerEl.textContent || '');
-            renderAnswerWithImages(answerEl, finalText, d.image_urls || []);
+            const alreadyShown = displayedAnswerText + pendingAnswerText;
+            if(finalText.startsWith(alreadyShown)){
+              pendingAnswerText += finalText.slice(alreadyShown.length);
+            }else{
+              displayedAnswerText = '';
+              pendingAnswerText = finalText;
+            }
+            finalPayload = d || {};
+            startTypewriter();
           }catch(_){}
           es.close();
           sendBtn.disabled = false;
+          loadSessions();
         });
 
         es.addEventListener('error', (e) => {
@@ -839,13 +1718,14 @@
           try{
             const msg = e && e.data ? (JSON.parse(e.data).error || 'SSE 连接中断/失败') : 'SSE 连接中断/失败';
             rawAnswerText += `\n\n（错误：${msg}）`;
-            renderAnswerWithImages(answerEl, rawAnswerText, []);
+            appendTypewriterText(`\n\n（错误：${msg}）`);
           }catch(_){
             rawAnswerText += `\n\n（错误：SSE 连接中断/失败）`;
-            renderAnswerWithImages(answerEl, rawAnswerText, []);
+            appendTypewriterText(`\n\n（错误：SSE 连接中断/失败）`);
           }
           es.close();
           sendBtn.disabled = false;
+          loadSessions();
         });
       }catch(e){
         const bubble = botMsgEl.querySelector('.bubble');
@@ -858,17 +1738,72 @@
     }
 
     sendBtn.addEventListener('click', onSend);
+    btnUploadPaper.addEventListener('click', () => fileUploadInput.click());
+    if(btnUploadPaperSide){
+      btnUploadPaperSide.addEventListener('click', () => fileUploadInput.click());
+    }
+    fileUploadInput.addEventListener('change', () => uploadPapers(fileUploadInput.files));
+    tabLogin.addEventListener('click', () => setAuthMode('login'));
+    tabRegister.addEventListener('click', () => setAuthMode('register'));
+    authSubmit.addEventListener('click', async () => {
+      const username = (authUsername.value || '').trim();
+      const password = authPassword.value || '';
+      authError.textContent = '';
+      if(!username){
+        authError.textContent = '请输入用户名';
+        authUsername.focus();
+        return;
+      }
+      if(password.length < 6){
+        authError.textContent = '密码长度不能少于6位';
+        authPassword.focus();
+        return;
+      }
+
+      try{
+        const path = authMode === 'login' ? '/auth/login' : '/auth/register';
+        const data = await fetchJson(`${API_BASE}${path}`, {
+          method: 'POST',
+          body: JSON.stringify({ username, password })
+        });
+        currentUser = data.user || null;
+        sessionToken = data.session_token || '';
+        if(sessionToken){
+          localStorage.setItem('kb_auth_token', sessionToken);
+        }
+        currentUserEl.textContent = currentUser && currentUser.username ? currentUser.username : '未登录';
+        ensureSessionId();
+        setLoginVisible(false);
+        resetChatToWelcome();
+        await loadSessions();
+        await loadHistory();
+        authPassword.value = '';
+        setTimeout(() => inputEl.focus(), 100);
+      }catch(e){
+        authError.textContent = e.message || '登录失败';
+      }
+    });
     inputEl.addEventListener('keydown', (e) => {
       if(e.key === 'Enter' && !e.shiftKey){
         e.preventDefault();
         onSend();
       }
     });
+    authPassword.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter'){
+        e.preventDefault();
+        authSubmit.click();
+      }
+    });
     btnClear.addEventListener('click', async () => {
-      if(!confirm('确定要清空当前会话的历史记录吗？这将无法恢复。')) return;
+      if(!currentUser){
+        setLoginVisible(true);
+        return;
+      }
+      if(!confirm('确定要删除当前对话吗？这会删除该会话的历史记录，无法恢复。')) return;
 
       try {
-        const res = await fetch(`${API_BASE}/history/${sessionId}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE}/history/${sessionId}`, { method: 'DELETE', credentials: 'include', headers: authHeaders() });
         if(!res.ok) {
            console.error("Failed to clear history backend, status:", res.status);
            alert('服务端清空失败，仅清空本地显示');
@@ -878,18 +1813,42 @@
         alert('服务端清空失败，仅清空本地显示');
       }
 
-      // 清空除首条欢迎消息外的内容
-      const nodes = Array.from(chatEl.querySelectorAll('.msg'));
-      for(let i=1;i<nodes.length;i++) nodes[i].remove();
-      scrollToBottom();
+      resetChatToWelcome();
+      await loadSessions();
+    });
+    btnNewSession.addEventListener('click', createNamedSession);
+    btnCreateSession.addEventListener('click', createNamedSession);
+    btnRenameSession.addEventListener('click', renameCurrentSession);
+    sessionListEl.addEventListener('click', (e) => {
+      const item = e.target.closest('.session-item');
+      if(!item) return;
+      switchSession(item.dataset.sessionId || '');
+    });
+    btnLogout.addEventListener('click', async () => {
+      try{
+        await fetchJson(`${API_BASE}/auth/logout`, { method: 'POST' });
+      }catch(_){ }
+      currentUser = null;
+      sessionId = '';
+      sessions = [];
+      sessionToken = '';
+      localStorage.removeItem('kb_auth_token');
+      currentUserEl.textContent = '未登录';
+      renderSessionList();
+      resetChatToWelcome();
+      setLoginVisible(true);
     });
 
     apiHealth();
     setInterval(apiHealth, 5000);
-    loadHistory();
-    setTimeout(() => inputEl.focus(), 200);
+    setAuthMode('login');
+    ensureAuth().then((user) => {
+      if(user){
+        loadSessions();
+        loadHistory();
+        setTimeout(() => inputEl.focus(), 200);
+      }
+    });
   </script>
 </body>
 </html>
-
-

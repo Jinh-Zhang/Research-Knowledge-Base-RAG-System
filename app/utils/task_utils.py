@@ -37,7 +37,7 @@ _NODE_NAME_TO_CN: Dict[str, str] = {
     "__end__": "处理完成",
     "END": "处理完成",
     # --- Query 流程节点（kb/query_process/main_graph.py）---
-    "node_item_name_confirm": "确认问题产品",
+    "node_item_name_confirm": "确认问题",
     "node_answer_output": "生成答案",
     "node_rerank": "重排序",
     "node_rrf": "倒排融合",

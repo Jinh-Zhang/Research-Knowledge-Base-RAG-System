@@ -11,9 +11,10 @@ from app.import_process.agent.nodes.node_entry import node_entry  # 入口节点
 from app.import_process.agent.nodes.node_pdf_to_md import node_pdf_to_md  # PDF转MD：解析PDF文件为markdown格式
 from app.import_process.agent.nodes.node_md_img import node_md_img  # MD图片处理：提取/下载markdown中的图片、修复图片路径
 from app.import_process.agent.nodes.node_document_split import node_document_split  # 文档分块：将长文档切分为符合模型要求的小片段
-from app.import_process.agent.nodes.node_item_name_recognition import node_item_name_recognition  # 项目名识别：从分块中提取核心项目名称（业务定制化）
+# from app.import_process.agent.nodes.node_item_name_recognition import node_item_name_recognition  # 项目名识别：从分块中提取核心项目名称（业务定制化）
 from app.import_process.agent.nodes.node_bge_embedding import node_bge_embedding  # BGE向量化：将文本分块转换为向量表示（适配Milvus向量库）
 from app.import_process.agent.nodes.node_import_milvus import node_import_milvus  # 导入Milvus：将向量数据写入Milvus向量数据库
+from app.import_process.agent.nodes.node_paper_item_name_recognition import node_paper_item_name_recognition
 
 
 # 初始化环境变量：必须在配置读取前执行，确保后续节点能获取到环境变量中的配置信息
@@ -33,7 +34,7 @@ workflow.add_node("node_entry", node_entry)  # 流程入口：参数初始化、
 workflow.add_node("node_pdf_to_md", node_pdf_to_md)  # PDF转MD：非MD格式文件的前置处理
 workflow.add_node("node_md_img", node_md_img)  # MD图片处理：保证文档中图片的可访问性
 workflow.add_node("node_document_split", node_document_split)  # 文档分块：解决大文本无法向量化/推理的问题
-workflow.add_node("node_item_name_recognition", node_item_name_recognition)  # 项目名识别：业务定制化步骤，提取核心业务标识
+workflow.add_node("node_item_name_recognition", node_paper_item_name_recognition)  # 项目名识别：业务定制化步骤，提取核心业务标识
 workflow.add_node("node_bge_embedding", node_bge_embedding)  # BGE向量化：文本→向量，为Milvus存储做准备
 workflow.add_node("node_import_milvus", node_import_milvus)  # 向量入库：将向量数据持久化到Milvus
 

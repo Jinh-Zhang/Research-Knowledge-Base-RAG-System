@@ -1,6 +1,10 @@
 import os
 import shutil
 import uuid
+import asyncio
+import logging
+import sys
+import tempfile
 from typing import List, Dict, Any
 from datetime import datetime
 import uvicorn
@@ -22,6 +26,69 @@ from app.utils.task_utils import (
 from app.import_process.agent.state import get_default_state
 from app.import_process.agent.main_graph import kb_import_app  # LangGraph全流程编译实例
 from app.core.logger import logger  # 项目统一日志工具
+
+
+class _IgnoreWindowsAsyncioDisconnectFilter(logging.Filter):
+    def filter(self, record):
+        message = record.getMessage()
+        if "_ProactorBasePipeTransport._call_connection_lost" in message:
+            return False
+
+        exc = record.exc_info[1] if record.exc_info else None
+        if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
+            return False
+
+        return True
+
+
+def _configure_windows_asyncio():
+    if not sys.platform.startswith("win"):
+        return
+
+    if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    asyncio_logger = logging.getLogger("asyncio")
+    if not any(isinstance(f, _IgnoreWindowsAsyncioDisconnectFilter) for f in asyncio_logger.filters):
+        asyncio_logger.addFilter(_IgnoreWindowsAsyncioDisconnectFilter())
+
+
+_configure_windows_asyncio()
+
+
+def _env_bool(name: str, default: bool = True) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+SAVE_IMPORT_OUTPUT = _env_bool("SAVE_IMPORT_OUTPUT", True)
+TEMP_IMPORT_ROOT = os.path.join(tempfile.gettempdir(), "knowledge_base_import")
+
+
+def _build_import_root_dir() -> str:
+    date_dir = datetime.now().strftime("%Y%m%d")
+    if SAVE_IMPORT_OUTPUT:
+        return os.path.join(PROJECT_ROOT / "output", date_dir)
+    return os.path.join(TEMP_IMPORT_ROOT, date_dir)
+
+
+def _cleanup_temp_import_dir(local_dir: str) -> None:
+    if SAVE_IMPORT_OUTPUT or not local_dir:
+        return
+
+    temp_root = os.path.abspath(TEMP_IMPORT_ROOT)
+    target = os.path.abspath(local_dir)
+    if not target.startswith(temp_root + os.sep):
+        logger.warning(f"跳过临时目录清理，路径不在预期范围内：{target}")
+        return
+
+    try:
+        shutil.rmtree(target, ignore_errors=True)
+        logger.info(f"临时导入目录已清理：{target}")
+    except Exception as e:
+        logger.warning(f"临时导入目录清理失败：{target}，错误：{e}", exc_info=True)
 
 # 初始化FastAPI应用实例
 # 标题和描述会在Swagger文档(http://ip:port/docs)中展示
@@ -64,6 +131,11 @@ async def get_import_page():
     )
 
 
+@app.get("/health")
+async def health():
+    return {"ok": True}
+
+
 # --------------------------
 # 后台任务：LangGraph全流程执行
 # 独立于主请求线程，由BackgroundTasks触发，避免阻塞接口响应
@@ -89,6 +161,7 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
         init_state["task_id"] = task_id  # 任务ID关联
         init_state["local_dir"] = local_dir  # 任务本地目录
         init_state["local_file_path"] = local_file_path  # 上传文件本地路径
+        init_state["save_import_output"] = SAVE_IMPORT_OUTPUT
 
         # 3. 流式执行LangGraph全流程（stream模式：实时获取每个节点的执行结果）
         for event in kb_import_app.stream(init_state):
@@ -106,6 +179,8 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
         # 5. 捕获全流程异常，更新任务全局状态为：失败，并记录错误日志（含堆栈）
         update_task_status(task_id, "failed")
         logger.error(f"[{task_id}] LangGraph全流程执行失败，异常信息：{str(e)}", exc_info=True)
+    finally:
+        _cleanup_temp_import_dir(local_dir)
 
 
 # --------------------------
@@ -128,7 +203,7 @@ async def upload_files(background_tasks: BackgroundTasks, files: List[UploadFile
     :return: 包含上传结果和所有任务ID的JSON响应
     """
     # 1. 构建本地存储根目录：项目根目录/output/YYYYMMDD（按日期分层，方便管理）
-    date_based_root_dir = os.path.join(PROJECT_ROOT / "output", datetime.now().strftime("%Y%m%d"))
+    date_based_root_dir = _build_import_root_dir()
     # 初始化任务ID列表，用于返回给前端（一个文件对应一个TaskID）
     task_ids = []
 

@@ -1,4 +1,5 @@
 import sys
+import json
 from app.utils.task_utils import add_running_task, add_done_task, set_task_result
 from app.utils.sse_utils import push_to_session, SSEEvent
 from app.query_process.agent.state import QueryGraphState
@@ -7,15 +8,17 @@ from app.core.load_prompt import load_prompt
 from app.lm.lm_utils import get_llm_client
 from app.clients.mongo_history_utils import save_chat_message
 import re
+from urllib.parse import unquote
+from html.parser import HTMLParser
 
-_IMAGE_BLOCK_MARKER = "【图片】"
 MAX_CONTEXT_CHARS = 12000
-
+IMAGE_BLOCK_PATTERN = re.compile(r"【\s*图片\s*】|\[\s*图片\s*\]")
+URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
 
 def node_answer_output(state: QueryGraphState) -> QueryGraphState:
     """
     1 判断state 中的answer是否已经存在，如果存在直接输出answer中的答案，注意判断是否需要流式输出需要则流式输出
-    2 根据state中的问题、重新问题、历史对话、提问商品（item_names）、 重排内容 组织prompt 并调用llm 生成答案
+    2 根据state中的问题、重新问题、历史对话、提问论文（paper_titles）、 重排内容 组织prompt 并调用llm 生成答案
     3 阶段三：调用大模型输出答案 注意判断是否需要流式输出需要则流式输出
     4 把答案写入到mongodb的history中 利用utils/mongo_history_utils.py中的save_chat_message方法
     5 做最后一次push操作（主要是为了触发前端图片渲染)
@@ -44,13 +47,30 @@ def node_answer_output(state: QueryGraphState) -> QueryGraphState:
         # 阶段三：  如果没有answer则 调用大模型输出答案
         step_3_generate_response(state, prompt)
 
-    # 提取图片URL（用于历史记录和前端展示）
-    image_urls = _extract_images_from_docs(state.get("reranked_docs") or [])
+    if state.get("answer"):
+        if not state.get("is_stream"):
+            set_task_result(state["session_id"], "answer", state["answer"])
+
+    # 提取候选图片信息，再按答案中明确输出的【图片】区块过滤。
+    # 这样检索上下文里有其它图时，不会把模型没有选择的图片展示给用户。
+    candidate_image_infos = _extract_image_infos_from_docs(state.get("reranked_docs") or [])
+    selected_image_urls = _extract_image_urls_from_answer(state.get("answer") or "")
+    image_infos = _filter_image_infos_by_urls(candidate_image_infos, selected_image_urls)
+    image_urls = [x["image_url"] for x in image_infos if x.get("image_url")]
+    state["image_urls"] = image_urls
+    state["image_infos"] = image_infos
+    if not state.get("is_stream"):
+        set_task_result(state["session_id"], "image_urls", image_urls)
+        set_task_result(state["session_id"], "image_infos", image_infos)
 
     # 阶段四：把答案写入到mongodb的history中
     if state.get("answer"):
         logger.info("---写入MongoDB历史记录---")
-        step_4_write_history(state, image_urls=image_urls)
+        step_4_write_history(
+            state,
+            image_urls=image_urls,
+            image_infos=image_infos,
+        )
 
     add_done_task(
         state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream")
@@ -65,7 +85,8 @@ def node_answer_output(state: QueryGraphState) -> QueryGraphState:
             {
                 "answer": state["answer"],
                 "status": "completed",
-                "image_urls": image_urls,  # 发送图片URL给前端
+                "image_urls": image_urls,  # 兼容旧前端
+                "image_infos": image_infos,  # 带 Figure 编号/来源/caption 的结构化图片信息
             },
         )
 
@@ -101,7 +122,7 @@ def step_1_check_answer(state) -> bool:
 def step_2_construct_prompt(state: QueryGraphState) -> str:
     """
     第一阶段：构建 Prompt
-    根据state中的问题、重新问题、历史对话、提问商品（item_names）、 重排内容 组织prompt
+    根据state中的问题、重新问题、历史对话、提问论文（paper_titles）、 重排内容 组织prompt
     """
     # 1. 获取相关信息
     original_query = state.get("original_query", "")
@@ -109,7 +130,7 @@ def step_2_construct_prompt(state: QueryGraphState) -> str:
     # 优先使用重写后的问题
     question = rewritten_query if rewritten_query else original_query
     history = state.get("history", [])
-    item_names = state.get("item_names", [])
+    paper_titles = state.get("paper_titles", [])
     reranked_docs = state.get("reranked_docs") or []
 
     # 2 从重排内容中，提取为资料字符串，不可超过限额
@@ -127,7 +148,10 @@ def step_2_construct_prompt(state: QueryGraphState) -> str:
     docs = []
     used = 0
     for i, doc in enumerate(reranked_docs, start=1):
-        text = (doc.get("text") or "").strip()
+        text = (
+            _get_doc_field(doc, "content", "")
+            or _get_doc_field(doc, "text", "")
+            ).strip()
         if not text:
             continue
         source = doc.get("source") or ""
@@ -136,7 +160,11 @@ def step_2_construct_prompt(state: QueryGraphState) -> str:
         title = (doc.get("title") or "").strip()
         score = doc.get("score")
 
-        meta_parts = [f"[{i}]"]
+        figure_text = _format_figures_for_prompt(doc)
+        table_text = _format_tables_for_prompt(doc)
+        doc_text = text + figure_text + table_text
+
+        meta_parts = [f"片段{i}"]
         if source:
             meta_parts.append(f"[{source}]")
         if chunk_id:
@@ -148,12 +176,12 @@ def step_2_construct_prompt(state: QueryGraphState) -> str:
             meta_parts.append(f"[score={float(score):.4f}]")
         if title:
             meta_parts.append(f"[title={title}]")
-        doc = " ".join(meta_parts) + "\n" + text
-        if used + len(doc) > MAX_CONTEXT_CHARS:
+        doc_block = " ".join(meta_parts) + "\n" + doc_text
+        if used + len(doc_block) > MAX_CONTEXT_CHARS:
             break
-        docs.append(doc)
+        docs.append(doc_block)
         # 计算使用长度！ + 2 两个\n\n
-        used += len(doc) + 2
+        used += len(doc_block) + 2
     context_str = "\n\n".join(docs) if docs else "无参考内容"
 
     # 3. 格式化 History (历史对话)
@@ -182,15 +210,15 @@ def step_2_construct_prompt(state: QueryGraphState) -> str:
     else:
         history_str = "无历史对话"
 
-    # 4. 格式化 Item Names (提问商品)
-    item_names_str = ", ".join(item_names) if item_names else "无指定商品"
+    # 4. 格式化 Paper Titles (提问论文)
+    paper_titles_str = ", ".join(paper_titles) if paper_titles else "无指定论文"
 
     # 5. 组装 Prompt
     prompt = load_prompt(
         "answer_out",
         context=context_str,
         history=history_str,
-        item_names=item_names_str,
+        paper_titles=paper_titles_str,
         question=question,
     )
 
@@ -251,8 +279,289 @@ def step_3_generate_response(state: QueryGraphState, prompt: str) -> QueryGraphS
 
     return state
 
+def _get_doc_field(doc, key, default=None):
+    """
+    兼容普通dict和Milvus hit结构：
+    doc[key]
+    doc["entity"][key]
+    """
+    if default is None:
+        default = ""
+    if not isinstance(doc, dict):
+        return default
 
-def _extract_images_from_docs(docs):
+    if key in doc and doc.get(key) is not None:
+        return doc.get(key)
+
+    entity = doc.get("entity") or {}
+    if isinstance(entity, dict) and key in entity and entity.get(key) is not None:
+        return entity.get(key)
+
+    return default
+
+
+def _load_json_field(value, default):
+    """
+    兼容：
+    - list/dict 原始对象
+    - JSON字符串
+    - 空值
+    """
+    if value is None:
+        return default
+    if isinstance(value, (list, dict)):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return default
+        try:
+            return json.loads(value)
+        except Exception:
+            return default
+    return default
+
+
+def _normalize_url(url):
+    return (url or "").strip().replace(" ", "%20").rstrip("，。,;；)]】）>\"'")
+
+
+def _url_match_keys(url):
+    normalized = _normalize_url(url)
+    if not normalized:
+        return set()
+    keys = {normalized}
+    decoded = unquote(normalized)
+    if decoded:
+        keys.add(decoded)
+        keys.add(decoded.replace(" ", "%20"))
+    return keys
+
+
+def _is_image_url(url):
+    base = _normalize_url(url).split("?", 1)[0].split("#", 1)[0].lower()
+    return base.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"))
+
+
+def _extract_image_urls_from_answer(answer):
+    """
+    只从模型显式输出的【图片】区块里取图片 URL。
+    没有该区块时返回空列表，避免把检索候选图误展示成答案图片。
+    """
+    answer = answer or ""
+    matches = list(IMAGE_BLOCK_PATTERN.finditer(answer))
+    if not matches:
+        return []
+
+    tail = answer[matches[-1].end():]
+    urls = []
+    seen = set()
+    for match in URL_PATTERN.finditer(tail):
+        url = _normalize_url(match.group(0))
+        if not _is_image_url(url) or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
+def _filter_image_infos_by_urls(image_infos, selected_urls):
+    if not selected_urls:
+        return []
+
+    info_by_url = {}
+    for info in image_infos or []:
+        if not isinstance(info, dict) or not info.get("image_url"):
+            continue
+        for key in _url_match_keys(info.get("image_url")):
+            info_by_url.setdefault(key, info)
+
+    filtered = []
+    for url in selected_urls:
+        normalized = _normalize_url(url)
+        info = next((info_by_url.get(key) for key in _url_match_keys(normalized) if info_by_url.get(key)), None)
+        if info:
+            filtered.append(info)
+        else:
+            filtered.append({"image_url": normalized})
+    return filtered
+
+
+def _format_figures_for_prompt(doc):
+    """
+    把 split 阶段生成的 figures 字段转换成可放进prompt的文本。
+    """
+    figures = _load_json_field(_get_doc_field(doc, "figures", []), [])
+    if not figures:
+        text = (
+            _get_doc_field(doc, "content", "")
+            or _get_doc_field(doc, "text", "")
+        )
+        figures = _extract_figures_from_text(text)
+    if not figures:
+        return ""
+
+    lines = ["\n【相关图片】"]
+    for fig in figures:
+        if not isinstance(fig, dict):
+            continue
+        fig_id = fig.get("figure_id", "")
+        caption = fig.get("caption", "")
+        image_url = fig.get("image_url", "")
+        if image_url:
+            lines.append(f"Figure {fig_id}: {caption}")
+            lines.append(f"Image URL: {image_url}")
+
+    return "\n".join(lines)
+
+
+def _format_tables_for_prompt(doc):
+    """
+    把 split 阶段生成的 tables 字段转换成可放进 prompt 的文本。
+    """
+    tables = _load_json_field(_get_doc_field(doc, "tables", []), [])
+    if not tables:
+        return ""
+
+    lines = ["\n\nRelated tables:"]
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_id = table.get("table_id", "")
+        caption = table.get("caption", "")
+        table_html = table.get("table_html", "")
+        if caption:
+            lines.append(f"Table {table_id}: {caption}" if table_id else caption)
+        if table_html:
+            table_markdown = _html_table_to_markdown(table_html)
+            if table_markdown:
+                lines.append(f"Table Markdown:\n{table_markdown}")
+            else:
+                lines.append(f"Table HTML: {table_html}")
+
+    return "\n".join(lines)
+
+
+class _TableHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+        self.current_row = None
+        self.current_cell = None
+        self.in_cell = False
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "tr":
+            self.current_row = []
+        elif tag in ("td", "th") and self.current_row is not None:
+            self.current_cell = []
+            self.in_cell = True
+
+    def handle_data(self, data):
+        if self.in_cell and self.current_cell is not None:
+            self.current_cell.append(data)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in ("td", "th") and self.in_cell and self.current_row is not None:
+            text = re.sub(r"\s+", " ", "".join(self.current_cell or [])).strip()
+            self.current_row.append(text)
+            self.current_cell = None
+            self.in_cell = False
+        elif tag == "tr" and self.current_row is not None:
+            if any(cell for cell in self.current_row):
+                self.rows.append(self.current_row)
+            self.current_row = None
+
+
+def _html_table_to_markdown(table_html):
+    if not table_html:
+        return ""
+    parser = _TableHTMLParser()
+    try:
+        parser.feed(table_html)
+    except Exception:
+        return ""
+
+    rows = parser.rows
+    if not rows:
+        return ""
+
+    max_cols = max(len(row) for row in rows)
+    normalized_rows = [row + [""] * (max_cols - len(row)) for row in rows]
+    header = normalized_rows[0]
+    body = normalized_rows[1:]
+
+    def fmt(row):
+        return "| " + " | ".join((cell or "").replace("|", "\\|") for cell in row) + " |"
+
+    lines = [fmt(header), "| " + " | ".join("---" for _ in header) + " |"]
+    lines.extend(fmt(row) for row in body)
+    return "\n".join(lines)
+
+
+def _extract_figures_from_text(text):
+    """
+    从 chunk 正文里解析 Markdown 图片及其紧邻的 Figure/Fig. caption。
+    兼容这种常见格式：
+      ![alt](url)
+      Figure 5: caption...
+    """
+    if not text:
+        return []
+
+    figures = []
+    image_pattern = re.compile(r"!\[(.*?)\]\((.*?)\)")
+    caption_pattern = re.compile(
+        r"\b(?:Figure|Fig\.?)\s*([A-Za-z0-9_.-]+)\s*[:：]\s*([^\n]+)",
+        re.IGNORECASE,
+    )
+
+    for match in image_pattern.finditer(text):
+        alt_text = (match.group(1) or "").strip()
+        image_url = (match.group(2) or "").strip()
+        if not image_url:
+            continue
+
+        # 图片后 600 字符内找最近的 Figure caption，避免跨太远误配。
+        tail = text[match.end(): match.end() + 600]
+        caption_match = caption_pattern.search(tail)
+        figure_id = ""
+        caption = ""
+        if caption_match:
+            figure_id = (caption_match.group(1) or "").strip()
+            caption = (caption_match.group(2) or "").strip()
+
+        figures.append(
+            {
+                "figure_id": figure_id,
+                "caption": caption,
+                "image_url": image_url,
+                "alt_text": alt_text,
+            }
+        )
+
+    return figures
+
+
+def _normalize_figure_caption(caption, figure_id=""):
+    caption = (caption or "").strip()
+    if not caption:
+        return ""
+    if figure_id:
+        caption = re.sub(
+            rf"^\s*(?:Figure|Fig\.?)\s*{re.escape(str(figure_id))}\s*[:：]\s*",
+            "",
+            caption,
+            flags=re.IGNORECASE,
+        )
+    else:
+        caption = re.sub(r"^\s*(?:Figure|Fig\.?)\s*[A-Za-z0-9_.-]+\s*[:：]\s*", "", caption, flags=re.IGNORECASE)
+    return caption.strip()
+
+
+def _extract_image_infos_from_docs(docs):
     """
     辅助方法：从文档列表中提取图片URL
 
@@ -267,7 +576,7 @@ def _extract_images_from_docs(docs):
     :param docs: 文档列表，每个文档为字典格式
     :return: 图片 URL 字符串列表
     """
-    images = []
+    image_infos = []
     seen = set()  # 用于去重，避免同一张图片重复出现
     if not docs:
         return []
@@ -284,43 +593,107 @@ def _extract_images_from_docs(docs):
     # ---------------------------------------------------------
     md_img_pattern = re.compile(r"!\[.*?\]\((.*?)\)")
 
+    def is_image_url(url):
+        url = (url or "").strip().split("?", 1)[0].split("#", 1)[0].lower()
+        return url.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"))
+
+    def add_img(url, source="", require_image_ext=False, meta=None):
+        url = (url or "").strip()
+        if not url:
+            return
+        if require_image_ext and not is_image_url(url):
+            return
+        if url in seen:
+            if meta:
+                for info in image_infos:
+                    if info.get("image_url") == url:
+                        for key, value in meta.items():
+                            if value and not info.get(key):
+                                info[key] = value
+                        break
+            return
+        else:
+            logger.debug(f"发现图片 URL ({source}): {url}")
+            seen.add(url)
+            info = dict(meta or {})
+            info["image_url"] = url
+            image_infos.append(info)
+
     logger.info(f"开始提取图片，待处理文档数: {len(docs)}")
 
     for i, doc in enumerate(docs):
-        # 1. 优先检查 url 字段 (主要针对 Web Search 结果)
-        url = (doc.get("url") or "").strip()
-        if url:
-            # 简单后缀判断：确保是静态图片资源
-            if url.lower().endswith(
-                (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")
-            ):
-                if url not in seen:
-                    logger.debug(f"文档[{i}] 发现图片 URL (字段): {url}")
-                    seen.add(url)
-                    images.append(url)
+        doc_meta = {
+            "doc_rank": i + 1,
+            "source": _get_doc_field(doc, "source", ""),
+            "chunk_id": _get_doc_field(doc, "chunk_id", "") or _get_doc_field(doc, "doc_id", ""),
+            "title": _get_doc_field(doc, "title", ""),
+        }
+        add_img(
+            _get_doc_field(doc, "url", ""),
+            f"doc[{i}].url",
+            require_image_ext=True,
+            meta=doc_meta,
+        )
 
-        # 2. 检查 text 字段中的 Markdown 图片 (主要针对 Local Chunk)
-        text = (doc.get("text") or "").strip()
+        # 2. content/text 里的 Markdown 图片
+        text = (
+            _get_doc_field(doc, "content", "")
+            or _get_doc_field(doc, "text", "")
+        ).strip()
+
         if text:
-            # findall 机制解释：
-            # 正则表达式 r'!\[.*?\]\((.*?)\)' 中包含一个捕获组 (.*?)
-            # 当存在捕获组时，findall 只返回括号内匹配到的内容（即 URL），而不是整个 ![...](...) 字符串
-            # 示例：
-            # 输入 text: "参考图片 ![面板图](http://img.com/1.jpg) 如下"
-            # 返回 matches: ['http://img.com/1.jpg']
-            matches = md_img_pattern.findall(text)
-            for img_url in matches:
-                img_url = img_url.strip()
-                if img_url and img_url not in seen:
-                    logger.debug(f"文档[{i}] 正文发现 Markdown 图片: {img_url}")
-                    seen.add(img_url)
-                    images.append(img_url)
+            parsed_figures = _extract_figures_from_text(text)
+            captioned_urls = {
+                fig.get("image_url") for fig in parsed_figures if fig.get("image_url")
+            }
+            for fig in parsed_figures:
+                add_img(
+                    fig.get("image_url"),
+                    f"doc[{i}].content/text",
+                    meta={
+                        **doc_meta,
+                        "figure_id": fig.get("figure_id", ""),
+                        "caption": fig.get("caption", ""),
+                        "alt_text": fig.get("alt_text", ""),
+                    },
+                )
+            for img_url in md_img_pattern.findall(text):
+                if img_url in captioned_urls:
+                    continue
+                add_img(img_url, f"doc[{i}].content/text", meta=doc_meta)
 
-    logger.info(f"图片提取完成，共找到 {len(images)} 张唯一图片: {images}")
-    return images
+        # 3. split 阶段新增的 figures 字段
+        figures = _load_json_field(_get_doc_field(doc, "figures", []), [])
+        if isinstance(figures, list):
+            for fig in figures:
+                if isinstance(fig, dict):
+                    add_img(
+                        fig.get("image_url"),
+                        f"doc[{i}].figures",
+                        meta={
+                            **doc_meta,
+                            "figure_id": fig.get("figure_id", ""),
+                            "caption": _normalize_figure_caption(
+                                fig.get("caption", ""),
+                                fig.get("figure_id", ""),
+                            ),
+                            "alt_text": fig.get("alt_text", ""),
+                        },
+                    )
+
+    logger.info(f"图片提取完成，共找到 {len(image_infos)} 张唯一图片: {image_infos}")
+    return image_infos
 
 
-def step_4_write_history(state: QueryGraphState, image_urls=None) -> QueryGraphState:
+def _extract_images_from_docs(docs):
+    return [x["image_url"] for x in _extract_image_infos_from_docs(docs) if x.get("image_url")]
+
+
+def step_4_write_history(
+    state: QueryGraphState,
+    image_urls=None,
+    image_infos=None,
+) -> QueryGraphState:
     """
     阶段四：把本轮答案写入 MongoDB history。
     利用 utils/mongo_history_utils.py 中的 save_chat_messages 方法。
@@ -328,7 +701,7 @@ def step_4_write_history(state: QueryGraphState, image_urls=None) -> QueryGraphS
     session_id = state.get("session_id", "default")
     user_id = state.get("user_id", "anonymous")
     answer = (state.get("answer") or "").strip()
-    item_names = state.get("item_names") or []
+    paper_titles = state.get("paper_titles") or []
 
     try:
         if answer:
@@ -338,8 +711,9 @@ def step_4_write_history(state: QueryGraphState, image_urls=None) -> QueryGraphS
                 role="assistant",
                 text=answer,
                 rewritten_query="",
-                item_names=item_names,
+                paper_titles=paper_titles,
                 image_urls=image_urls,
+                image_infos=image_infos,
                 message_id=None,
             )
     except Exception as e:
@@ -402,7 +776,7 @@ if __name__ == "__main__":
         "session_id": "test_answer_session_001",
         "original_query": "HAK 180 烫金机怎么操作？",
         "rewritten_query": "HAK 180 烫金机的具体操作步骤和面板设置方法",
-        "item_names": ["HAK 180 烫金机"],
+        "paper_titles": ["Retrieval-Augmented Generation"],
         "history": mock_history,
         "reranked_docs": mock_reranked_docs,
         "is_stream": False,  # 测试非流式

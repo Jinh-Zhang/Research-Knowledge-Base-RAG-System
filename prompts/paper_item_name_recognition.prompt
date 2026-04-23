@@ -1,0 +1,22 @@
+请根据下面信息提取论文元数据。
+
+文件标题：{file_title}
+
+正文片段：
+{context}
+
+请严格输出 JSON，格式如下：
+{{
+  "paper_title": "",
+  "authors": [],
+  "year": "",
+  "keywords": [],
+  "abstract": ""
+}}
+
+规则：
+1. paper_title 返回论文正式标题。
+2. authors 返回作者名列表。
+3. year 仅返回年份，如 2024。
+4. keywords 返回能代表论文主题的方法、任务、领域关键词。
+5. abstract 尽量提取摘要；如果当前片段无法确定，返回空字符串。

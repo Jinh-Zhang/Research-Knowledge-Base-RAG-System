@@ -1,0 +1,8 @@
+{
+  "count": 18,
+  "metrics": {
+    "faithfulness": 0.9726595928226364,
+    "llm_context_precision_with_reference": 0.7876169479817045,
+    "context_recall": 1.0
+  }
+}

@@ -213,7 +213,8 @@ def _merge_short_sections(sections: List[Dict[str, Any]], min_length: int = MIN_
 
         # 合并条件：1.当前块长度不足阈值 2.与下一块同父标题（同属一个原章节）
         is_current_short = len(current_chunk["content"]) < min_length
-        is_same_parent = current_chunk.get("parent_title") == sec.get("parent_title")
+        is_same_parent = (current_chunk.get("parent_title") is not None 
+                          and current_chunk.get("parent_title") == sec.get("parent_title"))
 
         if is_current_short and is_same_parent:
             # 合并前清理：去掉下一块开头重复的父标题，避免内容冗余
@@ -279,6 +280,259 @@ def step_4_refine_chunks(sections: List[Dict[str, Any]], max_len: int) -> List[D
     logger.debug(f"步骤4-3：父标题兜底完成，所有Chunk均包含parent_title字段")
 
     return final_sections
+
+
+def step_4_4_add_table_caption_overlap(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    给跨 chunk 的表格补语义 overlap。
+    当一个 chunk 末尾是 Table caption、下一个 chunk 含 <table> 时，
+    将 caption 复制到表格 chunk 开头，让表体 chunk 自身带 Table 编号锚点。
+    """
+    if not sections:
+        return sections
+
+    table_caption_pattern = re.compile(r'Table\s+(\d+):[^\n]*', re.IGNORECASE)
+    table_html_pattern = re.compile(r'<table\b', re.IGNORECASE)
+    added = 0
+
+    for idx in range(len(sections) - 1):
+        current = sections[idx]
+        nxt = sections[idx + 1]
+        if not isinstance(current, dict) or not isinstance(nxt, dict):
+            continue
+
+        current_content = current.get("content", "") or ""
+        next_content = nxt.get("content", "") or ""
+        if not current_content or not next_content or not table_html_pattern.search(next_content):
+            continue
+
+        captions = list(table_caption_pattern.finditer(current_content))
+        if not captions:
+            continue
+
+        caption = captions[-1].group(0).strip()
+        if not caption or caption in next_content[:500]:
+            continue
+
+        heading = nxt.get("parent_title", "") or nxt.get("title", "") or ""
+        if heading and next_content.startswith(heading):
+            body = next_content[len(heading):].lstrip()
+            nxt["content"] = f"{heading}\n\n{caption}\n\n{body}".strip()
+        else:
+            nxt["content"] = f"{caption}\n\n{next_content}".strip()
+        added += 1
+
+    logger.info(f"步骤4-4：表格caption语义overlap完成，共补充 {added} 个表格chunk")
+    return sections
+
+
+def is_reference_chunk(sec: Dict[str, Any]) -> bool:
+    title = (sec.get("title") or "").lower()
+    parent = (sec.get("parent_title") or "").lower()
+    return "references" in title or "references" in parent
+
+
+def extract_citation_ids(text: str) -> List[str]:
+    """
+    提取正文中的 [13]、[19, 51, 56]。
+    """
+    ids = []
+    for group in re.findall(r'\[(\d+(?:\s*,\s*\d+)*)\]', text):
+        ids.extend(re.findall(r'\d+', group))
+    return sorted(set(ids), key=lambda x: int(x))
+
+
+def build_reference_map(sections: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """
+    从 References chunks 里解析 [1] xxx 到 [n] xxx。
+    """
+    ref_text = "\n\n".join(
+        sec.get("content", "")
+        for sec in sections
+        if is_reference_chunk(sec)
+    )
+
+    ref_map = {}
+
+    pattern = re.compile(
+        r'(?m)^\[(\d+)\]\s+(.*?)(?=^\[\d+\]\s+|\Z)',
+        re.DOTALL
+    )
+
+    for m in pattern.finditer(ref_text):
+        ref_id = m.group(1)
+        ref_content = f"[{ref_id}] " + m.group(2).strip()
+
+        ref_map[ref_id] = {
+            "ref_id": ref_id,
+            "ref_content": ref_content,
+        }
+
+    return ref_map
+
+
+def step_4_5_link_citations(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    给每个正文 chunk 添加 citations / citation_refs。
+    """
+    ref_map = build_reference_map(sections)
+
+    for sec in sections:
+        content = sec.get("content", "")
+
+        if is_reference_chunk(sec):
+            sec["chunk_type"] = "reference"
+            found = re.findall(r'(?m)^\[(\d+)\]\s+', content)
+            sec["ref_ids"] = found
+            continue
+
+        citation_ids = extract_citation_ids(content)
+        sec["chunk_type"] = "body"
+        sec["citations"] = citation_ids
+        sec["citation_refs"] = [
+            ref_map[cid]
+            for cid in citation_ids
+            if cid in ref_map
+        ]
+
+    return sections
+
+def extract_figure_table_assets(sections: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """
+    从所有 chunk 中提取 Figure/Table 本体，建立 figure_map / table_map。
+    适配你当前 chunks.json 中的格式：
+    ![xxx](url)
+    Figure 1: xxx
+
+    Table 1: xxx
+    <table>...</table>
+    """
+    figure_map = {}
+    table_map = {}
+
+    fig_asset_pattern = re.compile(
+        r'!\[(.*?)\]\((.*?)\)\s*\n?\s*(Figure\s+(\d+):.*?)(?=\n\n|$)',
+        re.DOTALL | re.IGNORECASE
+    )
+
+    table_asset_pattern = re.compile(
+        r'(Table\s+(\d+):[^\n]*)(?:\n+)?(<table\b.*?</table>)',
+        re.DOTALL | re.IGNORECASE
+    )
+    table_caption_pattern = re.compile(
+        r'Table\s+(\d+):[^\n]*',
+        re.IGNORECASE
+    )
+    table_html_pattern = re.compile(
+        r'<table\b.*?</table>',
+        re.DOTALL | re.IGNORECASE
+    )
+
+    pending_table_caption = None
+
+    for sec in sections:
+        content = sec.get("content", "")
+
+        for m in fig_asset_pattern.finditer(content):
+            alt_text, image_url, caption, fig_id = m.groups()
+            figure_map[fig_id] = {
+                "figure_id": fig_id,
+                "caption": caption.strip(),
+                "image_url": image_url.strip(),
+                "alt_text": alt_text.strip(),
+                "source_chunk_title": sec.get("title"),
+                "source_parent_title": sec.get("parent_title"),
+            }
+
+        for m in table_asset_pattern.finditer(content):
+            caption, table_id, table_html = m.groups()
+            table_map[table_id] = {
+                "table_id": table_id,
+                "caption": caption.strip(),
+                "table_html": table_html.strip(),
+                "source_chunk_title": sec.get("title"),
+                "source_parent_title": sec.get("parent_title"),
+            }
+
+        table_html_matches = list(table_html_pattern.finditer(content))
+        if table_html_matches and pending_table_caption:
+            for table_html_match in table_html_matches:
+                table_id = pending_table_caption["table_id"]
+                if table_id in table_map:
+                    continue
+                table_map[table_id] = {
+                    "table_id": table_id,
+                    "caption": pending_table_caption["caption"],
+                    "table_html": table_html_match.group(0).strip(),
+                    "source_chunk_title": sec.get("title"),
+                    "source_parent_title": sec.get("parent_title"),
+                    "caption_chunk_title": pending_table_caption.get("source_chunk_title", ""),
+                    "caption_parent_title": pending_table_caption.get("source_parent_title", ""),
+                }
+
+        caption_matches = list(table_caption_pattern.finditer(content))
+        if caption_matches:
+            last_caption = caption_matches[-1]
+            table_id = last_caption.group(1)
+            pending_table_caption = {
+                "table_id": table_id,
+                "caption": last_caption.group(0).strip(),
+                "source_chunk_title": sec.get("title"),
+                "source_parent_title": sec.get("parent_title"),
+            }
+            if table_html_matches and last_caption.start() < table_html_matches[-1].end():
+                pending_table_caption = None
+        elif table_html_matches:
+            pending_table_caption = None
+
+    return figure_map, table_map
+
+
+def extract_figure_table_refs(text: str) -> Tuple[List[str], List[str]]:
+    """
+    从正文中提取 Figure 1 / Fig. 1 / Table 1 这种引用。
+    不匹配裸数字，避免误判。
+    """
+    fig_refs = re.findall(r'\b(?:Figure|Fig\.?)\s*(\d+)\b', text, flags=re.IGNORECASE)
+    table_refs = re.findall(r'\bTable\s*(\d+)\b', text, flags=re.IGNORECASE)
+
+    fig_refs = sorted(set(fig_refs), key=lambda x: int(x))
+    table_refs = sorted(set(table_refs), key=lambda x: int(x))
+
+    return fig_refs, table_refs
+
+
+def step_4_6_link_figures_tables(sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    给每个 chunk 添加：
+    fig_refs / table_refs：正文中提到的图表编号
+    figures / tables：对应图表本体信息，包括图片URL或表格HTML
+    """
+    figure_map, table_map = extract_figure_table_assets(sections)
+
+    for sec in sections:
+        content = sec.get("content", "")
+
+        fig_refs, table_refs = extract_figure_table_refs(content)
+
+        sec["fig_refs"] = fig_refs
+        sec["table_refs"] = table_refs
+        sec["figures"] = [
+            figure_map[fig_id]
+            for fig_id in fig_refs
+            if fig_id in figure_map
+        ]
+        sec["tables"] = [
+            table_map[table_id]
+            for table_id in table_refs
+            if table_id in table_map
+        ]
+
+    logger.info(
+        f"步骤4-6：图表链接完成，识别到 Figure {len(figure_map)} 个，Table {len(table_map)} 个"
+    )
+
+    return sections
 
 def step_5_print_stats(lines_count: int, sections: List[Dict[str, Any]]) -> None:
     """
@@ -373,7 +627,10 @@ def node_document_split(state: ImportGraphState) -> ImportGraphState:
         # 额外处理：对所有Chunk做parent_title兜底，适配Milvus向量库必填字段要求
         # 输出：长度适中、语义完整、低碎片化的最终Chunk列表（可直接用于向量入库/大模型调用）
         sections = step_4_refine_chunks(sections, max_len)
+        sections = step_4_4_add_table_caption_overlap(sections)
 
+        sections = step_4_5_link_citations(sections)
+        sections = step_4_6_link_figures_tables(sections)
         # ===================================== 步骤5：输出文档切分统计信息 =====================================
         # 作用：打印核心统计数据，便于监控切分效果、调试问题（原始行数/最终Chunk数/首个Chunk预览）
         # 输出：无返回值，仅通过logger输出标准化统计日志
