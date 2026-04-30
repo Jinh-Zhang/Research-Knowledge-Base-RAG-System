@@ -21,6 +21,39 @@ SINGLE_CHUNK_CONTENT_MAX_LEN = 1000
 CONTEXT_TOTAL_MAX_CHARS = 4000
 
 
+VENUE_ALIASES = {
+    "neurips": "NeurIPS",
+    "nips": "NeurIPS",
+    "conference on neural information processing systems": "NeurIPS",
+    "neural information processing systems": "NeurIPS",
+    "iclr": "ICLR",
+    "international conference on learning representations": "ICLR",
+    "icml": "ICML",
+    "international conference on machine learning": "ICML",
+    "cvpr": "CVPR",
+    "computer vision and pattern recognition": "CVPR",
+    "conference on computer vision and pattern recognition": "CVPR",
+    "iccv": "ICCV",
+    "international conference on computer vision": "ICCV",
+    "eccv": "ECCV",
+    "european conference on computer vision": "ECCV",
+    "acl": "ACL",
+    "association for computational linguistics": "ACL",
+    "emnlp": "EMNLP",
+    "empirical methods in natural language processing": "EMNLP",
+    "naacl": "NAACL",
+    "aaai": "AAAI",
+    "ijcai": "IJCAI",
+    "kdd": "KDD",
+    "www": "WWW",
+    "sigir": "SIGIR",
+    "wacv": "WACV",
+    "colm": "COLM",
+    "icassp": "ICASSP",
+    "interspeech": "INTERSPEECH",
+}
+
+
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "")).strip()
 
@@ -30,6 +63,45 @@ def _fallback_title(file_title: str) -> str:
     title = re.sub(r"\.(pdf|md)$", "", title, flags=re.IGNORECASE)
     title = re.sub(r"[_-]+", " ", title)
     return title.strip() or "Unknown Paper"
+
+
+def _normalize_venue(value: str) -> str:
+    venue = _clean_text(value)
+    if not venue:
+        return ""
+
+    normalized = re.sub(r"[_\-]+", " ", venue).lower()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    for raw, canonical in VENUE_ALIASES.items():
+        if re.search(rf"(?<![A-Za-z]){re.escape(raw)}(?![A-Za-z])", normalized, re.IGNORECASE):
+            return canonical
+
+    return venue
+
+
+def _extract_file_metadata(file_title: str) -> Dict[str, str]:
+    """
+    Extract stable paper metadata commonly encoded in the uploaded filename.
+
+    Many conference PDFs do not contain venue/year in the body, while filenames
+    often look like "NeurIPS 2025 - Paper Title.pdf". Keep this deterministic
+    and conservative so it can be used for filtering imported papers.
+    """
+    title = _clean_text(file_title)
+    normalized = re.sub(r"[_\-]+", " ", title)
+
+    venue = ""
+    for raw, canonical in VENUE_ALIASES.items():
+        if re.search(rf"(?<![A-Za-z]){re.escape(raw)}(?![A-Za-z])", normalized, re.IGNORECASE):
+            venue = canonical
+            break
+
+    year = ""
+    year_match = re.search(r"(?<!\d)(20[0-4]\d)(?!\d)", normalized)
+    if year_match:
+        year = year_match.group(1)
+
+    return {"venue": venue, "year": year}
 
 
 def _join_values(values: List[str]) -> str:
@@ -103,11 +175,13 @@ def _parse_llm_json(content: str) -> Dict[str, Any]:
 
 def step_3_call_llm(file_title: str, context: str) -> Dict[str, Any]:
     fallback_title = _fallback_title(file_title)
+    file_meta = _extract_file_metadata(file_title)
     if not context:
         return {
             "paper_title": fallback_title,
             "authors_text": "",
-            "year": "",
+            "year": file_meta.get("year", ""),
+            "venue": file_meta.get("venue", ""),
             "keywords_text": "",
             "abstract": "",
         }
@@ -149,13 +223,17 @@ def step_3_call_llm(file_title: str, context: str) -> Dict[str, Any]:
         _clean_text(str(keyword)) for keyword in keywords if _clean_text(str(keyword))
     ]
 
-    year = _clean_text(str(result.get("year", "")))
+    year_text = _clean_text(str(result.get("year", "")))
+    year_match = re.search(r"(?<!\d)(20[0-4]\d)(?!\d)", year_text)
+    year = (year_match.group(1) if year_match else year_text) or file_meta.get("year", "")
+    venue = _normalize_venue(str(result.get("venue", ""))) or file_meta.get("venue", "")
     abstract = _clean_text(result.get("abstract", ""))
 
     return {
         "paper_title": paper_title,
         "authors_text": _join_values(authors),
         "year": year,
+        "venue": venue,
         "keywords_text": _join_values(keywords),
         "abstract": abstract,
     }
@@ -173,13 +251,16 @@ def step_4_update_chunks(
 
     authors_text = _clean_text(paper_meta.get("authors_text", ""))
     keywords_text = _clean_text(paper_meta.get("keywords_text", ""))
+    year = _clean_text(str(paper_meta.get("year", "")))
+    venue = _clean_text(str(paper_meta.get("venue", "")))
 
     for chunk in chunks:
         chunk["item_name"] = paper_title
         chunk["paper_title"] = paper_title
         # chunk["authors"] = paper_meta.get("authors", [])
         chunk["authors_text"] = authors_text
-        chunk["year"] = paper_meta.get("year", "")
+        chunk["year"] = year
+        chunk["venue"] = venue
         # chunk["keywords"] = paper_meta.get("keywords", [])
         chunk["keywords_text"] = keywords_text
 
@@ -290,6 +371,12 @@ def step_6_save_to_milvus(
             schema.add_field(
                 field_name="paper_title", datatype=DataType.VARCHAR, max_length=65535
             )
+            schema.add_field(
+                field_name="venue", datatype=DataType.VARCHAR, max_length=64
+            )
+            schema.add_field(
+                field_name="year", datatype=DataType.VARCHAR, max_length=16
+            )
             # 添加稠密向量字段：FLOAT_VECTOR，1024维（BGE-M3固定维度）
             schema.add_field(
                 field_name="dense_vector", datatype=DataType.FLOAT_VECTOR, dim=1024
@@ -353,7 +440,13 @@ def step_6_save_to_milvus(
             )
 
         # 构造插入Milvus的数据：基础字段+非空向量字段
-        data = {"file_title": file_title, "paper_title": item_name}
+        paper_meta = state.get("paper_metadata") or {}
+        data = {
+            "file_title": file_title,
+            "paper_title": item_name,
+            "venue": _clean_text(str(paper_meta.get("venue", ""))),
+            "year": _clean_text(str(paper_meta.get("year", ""))),
+        }
         # 稠密向量非空才添加，避免空值入库报错
         if dense_vector is not None:
             data["dense_vector"] = dense_vector
@@ -407,13 +500,16 @@ def node_paper_item_name_recognition(state: ImportGraphState) -> ImportGraphStat
             f">>> 核心节点执行失败：【论文信息识别】{node_name}，错误信息：{exc}",
             exc_info=True,
         )
-        fallback_title = _fallback_title(state.get("file_title", ""))
+        file_title = state.get("file_title", "")
+        fallback_title = _fallback_title(file_title)
+        file_meta = _extract_file_metadata(file_title)
         state["item_name"] = fallback_title
         state["paper_title"] = fallback_title
         state["paper_metadata"] = {
             "paper_title": fallback_title,
             "authors_text": "",
-            "year": "",
+            "year": file_meta.get("year", ""),
+            "venue": file_meta.get("venue", ""),
             "keywords_text": "",
             "abstract": "",
         }

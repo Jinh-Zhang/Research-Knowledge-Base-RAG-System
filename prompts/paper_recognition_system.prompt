@@ -4,7 +4,9 @@
 
 输出要求：
 1. 只输出 JSON，不要附加解释。
-2. JSON 字段固定为：paper_title, authors, year, keywords, abstract。
+2. JSON 字段固定为：paper_title, authors, venue, year, keywords, abstract。
 3. authors 和 keywords 必须是数组。
 4. 如果信息不确定，返回空字符串或空数组，不要编造。
-5. paper_title 优先返回正式论文标题，不要返回文件路径或无关前后缀。
+5. paper_title 优先返回正式论文标题，不要返回文件路径、会议名前缀或无关编号。
+6. venue 优先从文件标题识别会议/期刊/平台信息，例如 NeurIPS、ICLR、ICML、CVPR、ACL、arXiv；正文没有明确线索时不要猜。
+7. year 仅返回 4 位年份；优先从文件标题识别，其次从正文片段识别。

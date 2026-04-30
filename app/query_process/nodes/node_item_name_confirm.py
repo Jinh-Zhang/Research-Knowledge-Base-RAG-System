@@ -34,6 +34,39 @@ TITLE_CONTAINS_SCORE_THRESHOLD = 0.45
 TOKEN_OVERLAP_THRESHOLD = 0.6
 
 
+VENUE_ALIASES = {
+    "neurips": "NeurIPS",
+    "nips": "NeurIPS",
+    "conference on neural information processing systems": "NeurIPS",
+    "neural information processing systems": "NeurIPS",
+    "iclr": "ICLR",
+    "international conference on learning representations": "ICLR",
+    "icml": "ICML",
+    "international conference on machine learning": "ICML",
+    "cvpr": "CVPR",
+    "computer vision and pattern recognition": "CVPR",
+    "conference on computer vision and pattern recognition": "CVPR",
+    "iccv": "ICCV",
+    "international conference on computer vision": "ICCV",
+    "eccv": "ECCV",
+    "european conference on computer vision": "ECCV",
+    "acl": "ACL",
+    "association for computational linguistics": "ACL",
+    "emnlp": "EMNLP",
+    "empirical methods in natural language processing": "EMNLP",
+    "naacl": "NAACL",
+    "aaai": "AAAI",
+    "ijcai": "IJCAI",
+    "kdd": "KDD",
+    "www": "WWW",
+    "sigir": "SIGIR",
+    "wacv": "WACV",
+    "colm": "COLM",
+    "icassp": "ICASSP",
+    "interspeech": "INTERSPEECH",
+}
+
+
 
 def _normalize_title_text(text: str) -> str:
     text = (text or "").strip().lower()
@@ -89,6 +122,65 @@ def _dedupe_title_candidates(candidates: List[str], limit: int = 3) -> List[str]
         if len(deduped) >= limit:
             break
     return deduped
+
+
+def _extract_query_metadata(query: str) -> Dict[str, str]:
+    text = query or ""
+    venue = ""
+    for raw, canonical in VENUE_ALIASES.items():
+        if re.search(rf"(?<![A-Za-z]){re.escape(raw)}(?![A-Za-z])", text, re.IGNORECASE):
+            venue = canonical
+            break
+
+    year = ""
+    year_match = re.search(r"(?<!\d)(20[0-4]\d)(?!\d)", text)
+    if year_match:
+        year = year_match.group(1)
+
+    return {"venue": venue, "year": year}
+
+
+def _build_metadata_filter(metadata: Dict[str, str]) -> str:
+    clauses = []
+    venue = (metadata or {}).get("venue", "").strip()
+    year = (metadata or {}).get("year", "").strip()
+    if venue:
+        clauses.append(f'venue == "{venue}"')
+    if year:
+        clauses.append(f'year == "{year}"')
+    return " and ".join(clauses)
+
+
+def _query_papers_by_metadata(metadata_filter: Dict[str, str], limit: int = 20) -> List[str]:
+    expr = _build_metadata_filter(metadata_filter)
+    if not expr:
+        return []
+
+    client = get_milvus_client()
+    collection_name = os.environ.get("ITEM_NAME_COLLECTION")
+    if not client or not collection_name:
+        return []
+
+    try:
+        rows = client.query(
+            collection_name=collection_name,
+            filter=expr,
+            output_fields=["paper_title", "file_title", "venue", "year"],
+            limit=limit,
+        )
+    except Exception as exc:
+        logger.warning(f"按论文元数据查询失败: expr={expr}, error={exc}")
+        return []
+
+    titles = []
+    seen = set()
+    for row in rows or []:
+        title = (row.get("paper_title") or "").strip()
+        norm = _normalize_title_text(title)
+        if title and norm not in seen:
+            seen.add(norm)
+            titles.append(title)
+    return titles
 
 
 def _llm_infer_best_paper(original_query: str, candidates: List[str]) -> Optional[str]:
@@ -233,11 +325,16 @@ def _generate_general_answer(query: str, history: List[Dict]) -> str:
     return answer
 
 
-def step_4_vectorize_and_query(paper_titles: List[str]) -> List[Dict]:
+def step_4_vectorize_and_query(
+    paper_titles: List[str],
+    metadata_filter: Optional[Dict[str, str]] = None,
+) -> List[Dict]:
     """
     对提取的 paper_titles 进行向量化并在 Milvus 中进行混合搜索
     """
-    logger.info(f"Step 4: 开始向量化检索，目标论文: {paper_titles}")
+    logger.info(
+        f"Step 4: 开始向量化检索，目标论文: {paper_titles}, metadata_filter={metadata_filter}"
+    )
     results = []
 
     client = get_milvus_client()
@@ -263,8 +360,12 @@ def step_4_vectorize_and_query(paper_titles: List[str]) -> List[Dict]:
                 sparse_vector = embeddings.get("sparse")[i]
 
                 # 构造混合搜索请求
+                expr = _build_metadata_filter(metadata_filter or {})
                 reqs = create_hybrid_search_requests(
-                    dense_vector=dense_vector, sparse_vector=sparse_vector, limit=5
+                    dense_vector=dense_vector,
+                    sparse_vector=sparse_vector,
+                    expr=expr or None,
+                    limit=5,
                 )
 
                 # 执行混合搜索
@@ -276,7 +377,7 @@ def step_4_vectorize_and_query(paper_titles: List[str]) -> List[Dict]:
                     ranker_weights=(0.8, 0.2),
                     limit=5,
                     norm_score=True,
-                    output_fields=["paper_title"],
+                    output_fields=["paper_title", "file_title", "venue", "year"],
                 )
 
                 matches = []
@@ -289,7 +390,15 @@ def step_4_vectorize_and_query(paper_titles: List[str]) -> List[Dict]:
                         score = hit.get("distance")
 
                         if paper_title:
-                            matches.append({"paper_title": paper_title, "score": score})
+                            matches.append(
+                                {
+                                    "paper_title": paper_title,
+                                    "file_title": entity.get("file_title", ""),
+                                    "venue": entity.get("venue", ""),
+                                    "year": entity.get("year", ""),
+                                    "score": score,
+                                }
+                            )
                             logger.debug(
                                 f"Step 4: '{name}' 匹配项: {paper_title} (Score: {score:.4f})"
                             )
@@ -505,18 +614,6 @@ def step_7_write_history(
     """
     logger.info("Step 7: 写入会话历史")
 
-    # 如果有助手回答（分支 B/C），写入助手消息
-    if state.get("answer"):
-        logger.info("Step 7: 保存助手回答")
-        save_chat_message(
-            user_id=user_id,
-            session_id=session_id,
-            role="assistant",
-            text=state["answer"],
-            rewritten_query="",
-            paper_titles=[],
-        )
-
     # 更新用户消息（关联 rewrite_query 和 paper_titles）
     logger.info(f"Step 7: 更新用户消息 (ID: {message_id})")
     save_chat_message(
@@ -558,6 +655,7 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
 
     # 3. 提取信息
     extract_res = step_3_extract_info(original_query, history)
+    metadata_filter = _extract_query_metadata(original_query)
     paper_titles = _dedupe_title_candidates(extract_res.get("paper_titles", []))
     retrieval_titles = _dedupe_title_candidates(extract_res.get("retrieval_titles", []))
     rewritten_query = extract_res.get("rewritten_query", original_query)
@@ -568,6 +666,13 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
                 f"Node: LLM 未提取到标准论文标题，改用同次返回的检索短语 -> {retrieval_titles}"
             )
             paper_titles = retrieval_titles
+        elif _build_metadata_filter(metadata_filter):
+            metadata_titles = _query_papers_by_metadata(metadata_filter)
+            if metadata_titles:
+                logger.info(f"Node: 按论文元数据命中论文标题 -> {metadata_titles}")
+                paper_titles = metadata_titles
+            else:
+                logger.info(f"Node: 按论文元数据未命中论文标题 -> {metadata_filter}")
         else:
             logger.info("Node: LLM 未提取到论文标题，检索短语也为空")
 
@@ -578,7 +683,7 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
 
     # 4. & 5. 如果有提取到论文标题，进行搜索和对齐
     if len(paper_titles) > 0:
-        query_results = step_4_vectorize_and_query(paper_titles)
+        query_results = step_4_vectorize_and_query(paper_titles, metadata_filter)
         align_result = step_5_align_paper_titles(query_results, original_query)
     else:
         logger.info("Node: 未提取到论文标题，跳过向量检索")

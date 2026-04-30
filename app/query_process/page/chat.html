@@ -623,6 +623,7 @@
             <button class="btn secondary" id="btnUploadPaperSide" type="button">上传</button>
           </div>
           <div class="import-note">支持 PDF / Markdown。导入完成后，可直接在右侧对话中询问这篇论文。</div>
+          <div class="import-note">建议文件名包含会议/期刊名称和年份，例如 <strong>NeurIPS_2026_论文标题.pdf</strong>，便于按来源和时间筛选。</div>
           <div class="import-list" id="importTaskList">
             <div class="session-meta">暂无导入任务</div>
           </div>
@@ -957,7 +958,6 @@
       for(const file of selected){
         formData.append('files', file);
       }
-
       btnUploadPaper.disabled = true;
       if(btnUploadPaperSide) btnUploadPaperSide.disabled = true;
       importPill.textContent = 'Import: 上传中';
