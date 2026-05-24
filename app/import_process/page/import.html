@@ -315,34 +315,42 @@
     function pollStatus(taskId, itemEl) {
         const statusBadge = itemEl.querySelector('.status-badge');
         const progressBar = itemEl.querySelector('.progress-bar');
-        
+        let pollCount = 0;
+        const MAX_POLLS = 300; // 最多轮询300次（约15分钟）
+
         const interval = setInterval(async () => {
+            pollCount++;
+            if (pollCount > MAX_POLLS) {
+                statusBadge.textContent = '超时';
+                statusBadge.className = 'status-badge status-error';
+                clearInterval(interval);
+                return;
+            }
             try {
                 const res = await fetch(`${API_BASE}/status/${taskId}`);
                 const data = await res.json();
 
                 // 渲染日志（done/running）
                 renderLogs(itemEl, data.done_list, data.running_list);
-                
+
                 if (data.status === 'completed') {
                     statusBadge.textContent = '已完成';
                     statusBadge.className = 'status-badge status-completed';
                     updateProgressBar(progressBar, 100);
                     clearInterval(interval);
                 } else if (data.status === 'processing') {
-                    // 保持处理中状态
                     statusBadge.textContent = '处理中...';
-                    // 确保进度为30%
-                     updateProgressBar(progressBar, 30);
+                    updateProgressBar(progressBar, 30);
                 } else if (data.status === 'failed') {
                     statusBadge.textContent = '失败';
                     statusBadge.className = 'status-badge status-error';
                     clearInterval(interval);
                 }
+                // status 为空或 pending 时继续等待，不做处理
             } catch (e) {
                 console.error('Polling error', e);
             }
-        }, 2000); // 每2秒轮询一次
+        }, 3000); // 每3秒轮询一次
     }
 </script>
 

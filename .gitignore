@@ -8,3 +8,6 @@
 *.json
 /test
 /test/
+.idea/
+.vscode/
+.claude/

@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m py_compile app/query_process/nodes/node_rerank.py)"
+      "Bash(python -m py_compile app/query_process/nodes/node_rerank.py)",
+      "Bash(xargs grep -l \"milvus\\\\|collection\" -i)"
     ]
   }
 }

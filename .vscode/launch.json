@@ -33,9 +33,10 @@
             "program": "${workspaceFolder}\\eval_rag.py",
             "args": [
                 "--qa_file", "${workspaceFolder}\\eval.json",
-                "--topk", "1", "3", "5",
-                // "--no_rerank",
-                "--filter_paper_title", "Test-Time Adaptation by Causal Trimming"
+                "--topk", "1", "3", "5","10",
+                "--online_pipeline",
+                "--online_no_source_protection",
+                "--output", "result/eval_result_no_source_protection.json"
             ],
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
