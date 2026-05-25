@@ -24,6 +24,9 @@ class QueryGraphState(TypedDict):
     # 生成过程中的数据
     prompt: str  # 组装好的 Prompt
     answer: str  # 最终生成的答案
+    answer_prefix: str  # 回答前缀说明（如联网兜底提示）
+    answer_suffix: str  # 回答尾部补充说明（如主要来源）
+    requested_titles: List[str]  # 用户显式提到、待检索或待兜底的论文标题
 
     # 辅助信息
     paper_titles: List[str]  # 提取出的论文标题

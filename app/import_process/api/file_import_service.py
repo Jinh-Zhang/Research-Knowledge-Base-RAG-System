@@ -13,6 +13,7 @@ from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 # 项目内部工具/配置/客户端
+from app.core.uvicorn_logging import suppress_uvicorn_health_access_logs
 from app.clients.minio_utils import get_minio_client
 from app.utils.path_util import PROJECT_ROOT
 from app.utils.task_utils import (
@@ -54,6 +55,7 @@ def _configure_windows_asyncio():
 
 
 _configure_windows_asyncio()
+suppress_uvicorn_health_access_logs()
 
 
 def _env_bool(name: str, default: bool = True) -> bool:

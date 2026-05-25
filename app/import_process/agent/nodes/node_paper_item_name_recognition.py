@@ -268,22 +268,22 @@ def step_4_update_chunks(
 
 def step_5_generate_vectors(item_name: str) -> Tuple[Any, Any]:
     """
-    步骤 5: 为商品名称生成BGE-M3稠密+稀疏双向量（Milvus向量检索核心）
+    步骤 5: 为论文名称生成BGE-M3稠密+稀疏双向量（Milvus向量检索核心）
     核心说明：
         - 稠密向量（dense_vector）：BGE-M3固定1024维，记录文本深层语义信息
         - 稀疏向量（sparse_vector）：变长键值对，记录文本关键词/特征位置信息
     依赖工具：
         generate_embeddings：封装BGE-M3模型，批量生成双向量，兼容单条/批量输入
     参数：
-        item_name: 步骤3识别的商品名称（非空，空值时直接返回空向量）
+        item_name: 步骤3识别的论文名称（非空，空值时直接返回空向量）
     返回值：
         Tuple[Any, Any]: (稠密向量列表, 稀疏向量字典)，空值/异常时返回(None, None)
     """
-    logger.info(f"开始执行步骤5：为商品名称[{item_name}]生成BGE-M3双向量")
+    logger.info(f"开始执行步骤5：为论文名称[{item_name}]生成BGE-M3双向量")
 
-    # 商品名称为空，直接返回空向量，跳过模型调用
+    # 论文名称为空，直接返回空向量，跳过模型调用
     if not item_name:
-        logger.warning("商品名称为空，跳过向量生成，返回空向量")
+        logger.warning("论文名称为空，跳过向量生成，返回空向量")
         return None, None
 
     try:
@@ -317,18 +317,18 @@ def step_6_save_to_milvus(
     sparse_vector,
 ):
     """
-    步骤 6: 将商品名称、文件标题、双向量持久化到Milvus向量数据库
+    步骤 6: 将论文名称、文件标题、双向量持久化到Milvus向量数据库
     核心逻辑：
         1. 配置校验：检查Milvus连接地址和集合名配置，缺失则跳过
         2. 客户端获取：获取单例Milvus客户端，连接失败则跳过
         3. 集合初始化：无集合则创建（定义Schema+索引），有集合则直接使用（保留原有配置）
-        4. 幂等性处理：删除同名商品数据，避免重复存储
+        4. 幂等性处理：删除同名论文数据，避免重复存储
         5. 数据插入：构造符合Schema的数据，非空向量才添加
         6. 集合加载：插入后强制加载集合，确保数据立即可查/Attu可见
     参数：
         state: 流程状态对象，用于最终状态同步
         file_title: 处理后的文件标题
-        item_name: 识别后的商品名称（主键去重依据）
+        item_name: 识别后的论文名称（主键去重依据）
         dense_vector: 步骤5生成的稠密向量（1024维列表）
         sparse_vector: 步骤5生成的稀疏向量（字典格式）
     """

@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
   <title>Paper RAG Research Console</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
   <style>
     :root{
       --bg:#eef2f6;
@@ -409,6 +412,11 @@
       font-weight:700;
     }
     .answer-text strong{font-weight:700}
+    .answer-text .katex-display{
+      overflow-x:auto;
+      overflow-y:hidden;
+      padding:6px 0;
+    }
     .msg.user .bubble{
       background:var(--bubble-user);
       color:#fff;
@@ -1089,6 +1097,21 @@
       return html.join('');
     }
 
+    function renderMathForContainer(container){
+      if(!container || typeof window.renderMathInElement !== 'function') return;
+      try{
+        window.renderMathInElement(container, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '\\[', right: '\\]', display: true},
+            {left: '$', right: '$', display: false},
+            {left: '\\(', right: '\\)', display: false}
+          ],
+          throwOnError: false
+        });
+      }catch(_){}
+    }
+
     function isImageUrl(url){
       // 增加宽松度，有些 url 可能后面跟了奇怪的参数
       // 只要包含 .jpg .png 等扩展名，且后面是 ? # 或 结束，或者被某些标点截断前
@@ -1224,6 +1247,9 @@
         source: info.source || '',
         chunk_id: info.chunk_id || '',
         title: info.title || '',
+        paper_title: info.paper_title || '',
+        file_title: info.file_title || '',
+        parent_title: info.parent_title || '',
         doc_rank: info.doc_rank || ''
       };
     }
@@ -1265,6 +1291,7 @@
         textEl.className = 'answer-text';
         textEl.innerHTML = markdownToHtml(text);
         containerEl.appendChild(textEl);
+        renderMathForContainer(textEl);
       }else{
         const textEl = document.createElement('div');
         textEl.className = 'answer-text';
@@ -1294,9 +1321,10 @@
             const meta = document.createElement('div');
             meta.className = 'answer-image-meta';
             const figureLabel = info.figure_id ? `Figure ${escapeHtml(info.figure_id)}` : '';
-            const sourceTitle = info.title ? escapeHtml(info.title) : '';
+            const sourceTitle = info.paper_title || info.file_title || info.title || info.parent_title || '';
+            const escapedSourceTitle = sourceTitle ? escapeHtml(sourceTitle) : '';
             const captionText = `${figureLabel}${info.caption ? `${figureLabel ? '：' : ''}${escapeHtml(info.caption)}` : ''}`;
-            meta.innerHTML = `${captionText ? `<div class="answer-image-caption">${captionText}</div>` : ''}${sourceTitle ? `<div>来源：${sourceTitle}</div>` : ''}`;
+            meta.innerHTML = `${captionText ? `<div class="answer-image-caption">${captionText}</div>` : ''}${escapedSourceTitle ? `<div>来源论文：${escapedSourceTitle}</div>` : ''}`;
             card.appendChild(meta);
           }
 

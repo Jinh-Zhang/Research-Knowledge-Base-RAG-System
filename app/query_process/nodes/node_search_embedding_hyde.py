@@ -38,6 +38,9 @@ def node_search_embedding_hyde(state):
     rewritten_query = state.get("rewritten_query")
     if not rewritten_query:
         rewritten_query = state.get("original_query")
+    if state.get("fallback_to_web_only"):
+        logger.info("检测到库外论文联网兜底模式，跳过本地 HyDE 检索")
+        return {}
 
     if not rewritten_query:
         logger.error(
@@ -192,7 +195,7 @@ def step_2_search_embedding_hyde(
 
     logger.info(f"Step 2: 准备在集合 '{collection_name}' 中执行混合检索")
 
-    # 构造过滤表达式 (如果有商品名限制)
+    # 构造过滤表达式 (如果有论文名限制)
     expr = None
     if paper_titles:
         # 处理 paper_titles 中的引号，防止注入或语法错误

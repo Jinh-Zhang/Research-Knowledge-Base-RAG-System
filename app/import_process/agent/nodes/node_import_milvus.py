@@ -105,11 +105,11 @@ def step_1_check_input(state: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int
             "错误: 数据中缺失dense_vector字段，请检查上游向量化节点执行状态"
         )
 
-    # 提取向量维度和商品名称，用于后续集合创建/日志展示
+    # 提取向量维度和论文名称，用于后续集合创建/日志展示
     vector_dimension = len(first_chunk["dense_vector"])
-    item_name = first_chunk.get("item_name", "未知商品名")
+    item_name = first_chunk.get("item_name", "未知论文名")
     logger.info(
-        f"Milvus入库校验通过，待入库切片数：{len(chunks_json_data)} | 向量维度：{vector_dimension} | 商品名称：{item_name}"
+        f"Milvus入库校验通过，待入库切片数：{len(chunks_json_data)} | 向量维度：{vector_dimension} | 论文名称：{item_name}"
     )
 
     return chunks_json_data, vector_dimension
@@ -148,7 +148,7 @@ def create_collection(client, collection_name: str, vector_dimension: int):
     )  # 源文件标题
     schema.add_field(
         field_name="item_name", datatype=DataType.VARCHAR, max_length=65535
-    )  # 商品名称（幂等性依据）
+    )  # 论文名称（幂等性依据）
     schema.add_field(
         field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR
     )  # 稀疏向量
@@ -273,7 +273,7 @@ def step_3_clean_old_data(client, chunks_json_data: List[Dict[str, Any]]):
         client - MilvusClient实例
         chunks_json_data: List[Dict[str, Any]] - 待入库的切片列表
     """
-    # 提取并去重item_name，避免重复清理同一商品数据
+    # 提取并去重item_name，避免重复清理同一论文数据
     # - 顺序 ：先循环 ( for ) -> 再判断 ( if ) -> 最后产出 ( name )。
     # - 海象操作符 ( := ) 的作用 ：它在第 ② 步判断的时候，顺手把处理好的字符串塞进了 name 变量里。如果 name 是空字符串 ""
     # （在 Python 里等同于 False）， if 条件不成立，第 ③ 步就不会执行，这个空值就被扔掉了。
@@ -308,26 +308,26 @@ def _clear_chunks_by_item_name(client, collection_name: str, item_name: str):
     参数：
         client - MilvusClient实例
         collection_name: str - 集合名称
-        item_name: str - 要清理的商品名称
+        item_name: str - 要清理的论文名称
     异常：
         清理失败抛出ValueError，终止整个入库流程（保证幂等性）
     """
     # 预处理：去除空格，空值直接返回
     i_name = (item_name or "").strip()
     if not i_name:
-        logger.warning("Milvus单商品清理跳过：item_name为空")
+        logger.warning("Milvus单论文清理跳过：item_name为空")
         return
     if not collection_name:
-        logger.warning("Milvus单商品清理跳过：集合名称未配置")
+        logger.warning("Milvus单论文清理跳过：集合名称未配置")
         return
 
     try:
         # 集合不存在则无需清理
         if not client.has_collection(collection_name=collection_name):
-            logger.info(f"Milvus单商品清理跳过：集合{collection_name}不存在")
+            logger.info(f"Milvus单论文清理跳过：集合{collection_name}不存在")
             return
 
-        # 1. 商品名称安全转义，避免filter表达式报错
+        # 1. 论文名称安全转义，避免filter表达式报错
         safe_item_name = escape_milvus_string(i_name)
         filter_expr = f'item_name == "{safe_item_name}"'
         logger.info(

@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 
+from app.core.uvicorn_logging import suppress_uvicorn_health_access_logs
 from app.utils.task_utils import *
 from app.utils.sse_utils import create_sse_queue, SSEEvent, sse_generator
 from app.clients.mongo_history_utils import *
@@ -50,13 +51,14 @@ def _configure_windows_asyncio():
 
 
 _configure_windows_asyncio()
+suppress_uvicorn_health_access_logs()
 
 # 后续导入启动图对象
 # from app.query_process.main_graph import query_app
 
 
 # 定义fastapi对象
-app = FastAPI(title="query service", description="掌柜智库查询服务！")
+app = FastAPI(title="query service", description="科研知识查询服务！")
 # 跨域问题解决
 app.add_middleware(
     CORSMiddleware,

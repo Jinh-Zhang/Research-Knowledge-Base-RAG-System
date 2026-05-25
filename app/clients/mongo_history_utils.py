@@ -427,7 +427,7 @@ def update_message_paper_titles(ids: List[str], paper_titles: List[str]) -> int:
             },
             {"$set": {"paper_titles": paper_titles}},  # 更新操作：设置新的论文标题列表
         )
-        # 记录更新成功日志，包含更新数量和新的商品名称
+        # 记录更新成功日志，包含更新数量和新的论文名称
         logging.info(
             f"Updated {result.modified_count} records to paper_titles: {paper_titles}"
         )

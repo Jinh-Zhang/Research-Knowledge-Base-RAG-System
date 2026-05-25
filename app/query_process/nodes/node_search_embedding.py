@@ -20,7 +20,7 @@ def node_search_embedding(state):
     :param state: Dict - 会话状态字典，包含上游传递的核心信息，关键字段：
                   {
                       "session_id": str,        # 会话唯一标识
-                      "rewritten_query": str,   # step3改写后的完整用户问题（含商品名）
+                      "rewritten_query": str,   # step3改写后的完整用户问题（含论文名）
                       "paper_titles": list[str],  # step6已确认的标准化论文标题列表
                       "is_stream": bool/None    # 是否为流式响应，可选
                   }
@@ -40,6 +40,9 @@ def node_search_embedding(state):
     paper_titles = state.get(
         "paper_titles"
     )  # 提取已确认的标准化论文标题列表（精准过滤用）
+    if state.get("fallback_to_web_only"):
+        logger.info("检测到库外论文联网兜底模式，跳过本地 embedding 检索")
+        return {"embedding_chunks": []}
 
     logger.info(f"核心入参提取: query='{query}', paper_titles={paper_titles}")
 
@@ -69,7 +72,7 @@ def node_search_embedding(state):
     # 先通过辅助函数生成论文标题过滤表达式，精准过滤检索范围
     # 'paper_title in ["论文A", "论文B"]'
 
-    # 若无商品名，直接返回None（不做过滤）
+    # 若无论文名，直接返回None（不做过滤）
     if not paper_titles:
         logger.warning("paper_titles 为空，跳过检索，返回空结果")
         return {"embedding_chunks": []}

@@ -17,7 +17,7 @@ from app.core.logger import logger
 # 核心设计：
 #   - 单例模型：避免重复加载模型，节省显存/时间
 #   - 批量处理：分批生成向量，防止大批次导致的显存溢出
-#   - 文本增强：拼接商品名+切片内容，强化核心特征，提升检索准确性
+#   - 文本增强：拼接论文名+切片内容，强化核心特征，提升检索准确性
 # ==========================================
 def node_bge_embedding(state: ImportGraphState) -> ImportGraphState:
     """
@@ -116,7 +116,7 @@ def step_3_generate_embeddings(texts_to_embed: List[Dict[str, Any]], bge_m3_ef: 
     """
     向量化核心步骤3：批量生成稠密/稀疏双向量
     核心逻辑（分批执行，每批独立异常处理）：
-        1. 文本拼接：item_name（商品名）+ 换行 + content（切片内容），强化核心特征
+        1. 文本拼接：item_name（论文名）+ 换行 + content（切片内容），强化核心特征
         2. 批量调用：传入拼接后的文本，生成批量双向量
         3. 向量绑定：为每个切片复制原数据，新增dense_vector/sparse_vector字段
         4. 异常兜底：单批次失败则保留原切片数据，继续处理下一批次
@@ -142,19 +142,19 @@ def step_3_generate_embeddings(texts_to_embed: List[Dict[str, Any]], bge_m3_ef: 
         start_idx, end_idx = i + 1, min(i + len(batch_texts), total)
 
         try:
-            # 构造模型输入文本：拼接商品名+切片内容，增强核心特征
+            # 构造模型输入文本：拼接论文名+切片内容，增强核心特征
             input_texts = []
             for doc in batch_texts:
                 item_name = doc["item_name"]
                 content = doc["content"]
-                # 有商品名则拼接（换行分隔提升模型识别效率），无则直接使用内容
+                # 有论文名则拼接（换行分隔提升模型识别效率），无则直接使用内容
                 # 几乎所有的 Embedding 模型（尤其是基于 BERT 架构的），对前 128 个 token 的注意力是最集中的。越往后的词，对最终向量方向的拉扯力越弱。
                 # **“核心词前置”**的原则
                 # 方案 1：用强标点代替换行（最简单、最推荐）
                 # 优化前：苹果手机\n性能很好...
                 # 优化后：苹果手机。性能很好...
                 # 方案2：加一点“微量”的语义胶水（适合属性明确的场景）
-                text = f"商品：{item_name}，介绍：{content}" if item_name else content
+                text = f"论文：{item_name}，介绍：{content}" if item_name else content
                 # Embedding 模型是个强迫症，你给它喂中文，就用全套中文标点伺候；给它喂英文，就用全套英文标点。保持 语境纯粹 ，生成的向量质量最高！
                 input_texts.append(text)
 
@@ -199,7 +199,7 @@ if __name__ == '__main__':
     # 构造模拟测试状态：模拟上游节点输出的chunks数据，贴合真实业务场景
     test_state = ImportGraphState({
         "task_id": "test_task_embedding_001",  # 测试任务ID
-        "chunks": [  # 模拟带item_name的文本切片（上游商品名称识别节点产出）
+        "chunks": [  # 模拟带item_name的文本切片（上游论文名称识别节点产出）
             {
                 "content": "这是一个测试文档的内容，用于验证向量化是否成功。",
                 "title": "测试文档标题",
