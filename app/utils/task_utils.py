@@ -28,6 +28,7 @@ _NODE_NAME_TO_CN: Dict[str, str] = {
     "upload_file": "开始上传文件",
     "node_entry": "检查文件",
     "node_pdf_to_md": "PDF转Markdown",
+    "node_normalize_to_md": "文档归一化为Markdown",
     "node_md_img": "Markdown图片处理",
     "node_item_name_recognition": "主体名称识别",
     "node_document_split": "文档切分",

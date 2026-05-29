@@ -14,6 +14,7 @@ from html.parser import HTMLParser
 MAX_CONTEXT_CHARS = 12000
 IMAGE_BLOCK_PATTERN = re.compile(r"【\s*图片\s*】|\[\s*图片\s*\]")
 URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
+DISPLAY_TITLE_KEYS = ("paper_title", "file_title", "title", "parent_title")
 
 def node_answer_output(state: QueryGraphState) -> QueryGraphState:
     """
@@ -43,6 +44,7 @@ def node_answer_output(state: QueryGraphState) -> QueryGraphState:
     if not answer_exists:
         prompt = step_2_construct_prompt(state)
         state["prompt"] = prompt
+        state["answer_suffix"] = _build_answer_suffix_from_docs(state.get("reranked_docs") or [])
 
         # 阶段三：  如果没有answer则 调用大模型输出答案
         step_3_generate_response(state, prompt)
@@ -91,6 +93,28 @@ def node_answer_output(state: QueryGraphState) -> QueryGraphState:
         )
 
     logger.info("---node_answer_output 节点处理结束---")
+    return state
+
+
+def _apply_answer_prefix(state: QueryGraphState) -> QueryGraphState:
+    prefix = (state.get("answer_prefix") or "").strip()
+    answer = (state.get("answer") or "").strip()
+    if not prefix or not answer:
+        return state
+    if answer.startswith(prefix):
+        return state
+    state["answer"] = f"{prefix}\n\n{answer}"
+    return state
+
+
+def _apply_answer_suffix(state: QueryGraphState) -> QueryGraphState:
+    suffix = (state.get("answer_suffix") or "").strip()
+    answer = (state.get("answer") or "").strip()
+    if not suffix or not answer:
+        return state
+    if answer.endswith(suffix):
+        return state
+    state["answer"] = f"{answer}\n\n{suffix}"
     return state
 
 
@@ -264,6 +288,8 @@ def step_3_generate_response(state: QueryGraphState, prompt: str) -> QueryGraphS
             push_to_session(session_id, SSEEvent.ERROR, {"error": str(e)})
 
         state["answer"] = final_text
+        _apply_answer_prefix(state)
+        _apply_answer_suffix(state)
     else:
         # 非流式直接调用
         logger.info(f"模式: 非流式输出 (Blocking), Session: {session_id}")
@@ -271,7 +297,9 @@ def step_3_generate_response(state: QueryGraphState, prompt: str) -> QueryGraphS
             response = llm.invoke(prompt)
             content = response.content
             state["answer"] = content
-            set_task_result(session_id, "answer", content)
+            _apply_answer_prefix(state)
+            _apply_answer_suffix(state)
+            set_task_result(session_id, "answer", state["answer"])
             logger.info(f"生成回答完成，长度: {len(content)}")
         except Exception as e:
             logger.error(f"生成回答出错: {e}", exc_info=True)
@@ -298,6 +326,14 @@ def _get_doc_field(doc, key, default=None):
         return entity.get(key)
 
     return default
+
+
+def _best_doc_title(doc):
+    for key in DISPLAY_TITLE_KEYS:
+        value = _get_doc_field(doc, key, "")
+        if value:
+            return value
+    return ""
 
 
 def _load_json_field(value, default):
@@ -561,6 +597,37 @@ def _normalize_figure_caption(caption, figure_id=""):
     return caption.strip()
 
 
+def _build_answer_suffix_from_docs(docs):
+    if not docs:
+        return ""
+
+    local_titles = []
+    web_titles = []
+    seen_local = set()
+    seen_web = set()
+
+    for doc in docs:
+        source = (_get_doc_field(doc, "source", "") or "").strip().lower()
+        title = (_best_doc_title(doc) or "").strip()
+        if not title:
+            continue
+        if source == "web":
+            if title not in seen_web:
+                seen_web.add(title)
+                web_titles.append(title)
+        else:
+            if title not in seen_local:
+                seen_local.add(title)
+                local_titles.append(title)
+
+    lines = []
+    if local_titles:
+        lines.append(f"主要本地来源：{'；'.join(local_titles[:3])}")
+    if web_titles:
+        lines.append(f"主要联网来源：{'；'.join(web_titles[:3])}")
+    return "\n".join(lines)
+
+
 def _extract_image_infos_from_docs(docs):
     """
     辅助方法：从文档列表中提取图片URL
@@ -626,7 +693,10 @@ def _extract_image_infos_from_docs(docs):
             "doc_rank": i + 1,
             "source": _get_doc_field(doc, "source", ""),
             "chunk_id": _get_doc_field(doc, "chunk_id", "") or _get_doc_field(doc, "doc_id", ""),
-            "title": _get_doc_field(doc, "title", ""),
+            "title": _best_doc_title(doc),
+            "paper_title": _get_doc_field(doc, "paper_title", ""),
+            "file_title": _get_doc_field(doc, "file_title", ""),
+            "parent_title": _get_doc_field(doc, "parent_title", ""),
         }
         add_img(
             _get_doc_field(doc, "url", ""),

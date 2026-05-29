@@ -67,6 +67,7 @@ def _env_bool(name: str, default: bool = True) -> bool:
 
 SAVE_IMPORT_OUTPUT = _env_bool("SAVE_IMPORT_OUTPUT", True)
 TEMP_IMPORT_ROOT = os.path.join(tempfile.gettempdir(), "knowledge_base_import")
+SUPPORTED_IMPORT_EXTENSIONS = {".pdf", ".md", ".markdown", ".txt", ".docx"}
 
 
 def _build_import_root_dir() -> str:
@@ -211,6 +212,15 @@ async def upload_files(background_tasks: BackgroundTasks, files: List[UploadFile
 
     # 2. 遍历处理每个上传的文件（多文件批量处理，各自独立生成TaskID）
     for file in files:
+        suffix = os.path.splitext(file.filename or "")[1].lower()
+        if suffix not in SUPPORTED_IMPORT_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unsupported file type: {file.filename}. "
+                    f"Supported types: {', '.join(sorted(SUPPORTED_IMPORT_EXTENSIONS))}"
+                ),
+            )
         # 生成全局唯一TaskID（UUID4），作为单个文件的全流程标识
         task_id = str(uuid.uuid4())
         task_ids.append(task_id)

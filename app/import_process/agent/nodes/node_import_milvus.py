@@ -1,7 +1,7 @@
 import os
 import sys
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 # 导入Milvus相关依赖
 from pymilvus import DataType
@@ -16,6 +16,201 @@ from app.utils.escape_milvus_string_utils import escape_milvus_string
 
 # 从配置文件读取切片集合名称，与配置解耦，便于环境切换
 CHUNKS_COLLECTION_NAME = milvus_config.chunks_collection
+MILVUS_DYNAMIC_FIELD_MAX_LENGTH = 65536
+MILVUS_DYNAMIC_FIELD_SAFE_MARGIN = 1024
+STATIC_SCHEMA_FIELDS = {
+    "chunk_id",
+    "content",
+    "title",
+    "parent_title",
+    "part",
+    "file_title",
+    "item_name",
+    "sparse_vector",
+    "dense_vector",
+}
+JSON_DYNAMIC_FIELDS = (
+    "citations",
+    "citation_refs",
+    "ref_ids",
+    "fig_refs",
+    "figures",
+    "table_refs",
+    "tables",
+    "paper_title",
+    "venue",
+    "year",
+    "authors_text",
+    "keywords_text",
+    "chunk_type",
+)
+DROP_FIELD_ORDER = (
+    "tables",
+    "figures",
+    "citation_refs",
+    "authors_text",
+    "keywords_text",
+    "paper_title",
+)
+
+
+def _serialize_dynamic_value(value: Any) -> str:
+    """Serialize dynamic field values the same way Milvus will see them."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _dynamic_field_length(item: Dict[str, Any]) -> int:
+    """Approximate serialized dynamic field payload size for one row."""
+    payload = {}
+    for key, value in item.items():
+        if key in STATIC_SCHEMA_FIELDS:
+            continue
+        payload[key] = value
+    return len(json.dumps(payload, ensure_ascii=False))
+
+
+def _shrink_table_payload(table_value: Any) -> Tuple[Any, bool]:
+    """Keep only lightweight table metadata before dropping the field entirely."""
+    if isinstance(table_value, str):
+        try:
+            table_value = json.loads(table_value)
+        except Exception:
+            return table_value, False
+
+    if not isinstance(table_value, list):
+        return table_value, False
+
+    slim_tables = []
+    changed = False
+    for table in table_value:
+        if not isinstance(table, dict):
+            slim_tables.append(table)
+            continue
+        slim_table = {
+            "table_id": table.get("table_id", ""),
+            "caption": table.get("caption", ""),
+        }
+        if slim_table != table:
+            changed = True
+        slim_tables.append(slim_table)
+    return slim_tables, changed
+
+
+def _shrink_figure_payload(figure_value: Any) -> Tuple[Any, bool]:
+    """Keep figure id/caption/url and drop verbose source metadata."""
+    if isinstance(figure_value, str):
+        try:
+            figure_value = json.loads(figure_value)
+        except Exception:
+            return figure_value, False
+
+    if not isinstance(figure_value, list):
+        return figure_value, False
+
+    slim_figures = []
+    changed = False
+    for fig in figure_value:
+        if not isinstance(fig, dict):
+            slim_figures.append(fig)
+            continue
+        slim_figure = {
+            "figure_id": fig.get("figure_id", ""),
+            "caption": fig.get("caption", ""),
+            "image_url": fig.get("image_url", ""),
+            "alt_text": fig.get("alt_text", ""),
+        }
+        if slim_figure != fig:
+            changed = True
+        slim_figures.append(slim_figure)
+    return slim_figures, changed
+
+
+def _shrink_citation_refs_payload(citation_refs: Any) -> Tuple[Any, bool]:
+    """Preserve only reference ids to avoid storing full reference text repeatedly."""
+    if isinstance(citation_refs, str):
+        try:
+            citation_refs = json.loads(citation_refs)
+        except Exception:
+            return citation_refs, False
+
+    if not isinstance(citation_refs, list):
+        return citation_refs, False
+
+    slim_refs = []
+    changed = False
+    for ref in citation_refs:
+        if isinstance(ref, dict):
+            slim_ref = {"ref_id": ref.get("ref_id", "")}
+            if slim_ref != ref:
+                changed = True
+            slim_refs.append(slim_ref)
+        else:
+            slim_refs.append(ref)
+    return slim_refs, changed
+
+
+def _prepare_item_for_insert(item: Dict[str, Any]) -> Dict[str, Any]:
+    item_copy = item.copy()
+    if isinstance(item_copy, dict) and "chunk_id" in item_copy:
+        item_copy.pop("chunk_id", None)
+
+    for field in JSON_DYNAMIC_FIELDS:
+        if field in item_copy and not isinstance(item_copy[field], str):
+            item_copy[field] = _serialize_dynamic_value(item_copy[field])
+
+    target_limit = MILVUS_DYNAMIC_FIELD_MAX_LENGTH - MILVUS_DYNAMIC_FIELD_SAFE_MARGIN
+    dynamic_length = _dynamic_field_length(item_copy)
+    if dynamic_length <= target_limit:
+        return item_copy
+
+    item_label = (
+        str(item_copy.get("title") or item_copy.get("parent_title") or item_copy.get("file_title") or "")
+        [:80]
+    )
+    logger.warning(
+        f"Milvus动态字段超限预警：chunk={item_label or 'unknown'} | current={dynamic_length} | limit={target_limit}"
+    )
+
+    shrinkers = {
+        "tables": _shrink_table_payload,
+        "figures": _shrink_figure_payload,
+        "citation_refs": _shrink_citation_refs_payload,
+    }
+    for field, shrinker in shrinkers.items():
+        if field not in item_copy:
+            continue
+        shrunk_value, changed = shrinker(item_copy[field])
+        if not changed:
+            continue
+        item_copy[field] = _serialize_dynamic_value(shrunk_value)
+        dynamic_length = _dynamic_field_length(item_copy)
+        logger.warning(
+            f"Milvus动态字段瘦身：chunk={item_label or 'unknown'} | field={field} | current={dynamic_length}"
+        )
+        if dynamic_length <= target_limit:
+            return item_copy
+
+    for field in DROP_FIELD_ORDER:
+        if field not in item_copy:
+            continue
+        item_copy.pop(field, None)
+        dynamic_length = _dynamic_field_length(item_copy)
+        logger.warning(
+            f"Milvus动态字段裁剪：chunk={item_label or 'unknown'} | dropped={field} | current={dynamic_length}"
+        )
+        if dynamic_length <= target_limit:
+            return item_copy
+
+    if dynamic_length > target_limit:
+        raise ValueError(
+            f"单条chunk动态字段仍超限，无法安全入库：chunk={item_label or 'unknown'} length={dynamic_length}"
+        )
+
+    return item_copy
 
 
 # ==========================================
@@ -372,23 +567,7 @@ def step_4_insert_data(
     # 1. 预处理数据：移除手动chunk_id，序列化列表字段
     data_to_insert = []
     for item in chunks_json_data:
-        item_copy = item.copy()
-        if isinstance(item_copy, dict) and "chunk_id" in item_copy:
-            item_copy.pop("chunk_id", None)
-        
-        # 序列化列表/字典字段为JSON字符串，并给缺失字段补空列表。
-        # 查询侧会用 json.loads 兼容还原。
-        for field in [
-            "citations",
-            "citation_refs",
-            "ref_ids",
-            "fig_refs",
-            "figures",
-            "table_refs",
-            "tables",
-        ]:
-            if field in item_copy and isinstance(item_copy[field], (list, dict)):
-                item_copy[field] = json.dumps(item_copy[field], ensure_ascii=False)
+        item_copy = _prepare_item_for_insert(item)
         data_to_insert.append(item_copy)
 
     logger.info(f"Milvus数据插入：准备{len(data_to_insert)}条切片数据，开始批量插入")

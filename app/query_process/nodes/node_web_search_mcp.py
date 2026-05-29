@@ -2,11 +2,57 @@ import sys
 import json
 import asyncio
 import threading
+import re
 from typing import Any
 from app.utils.task_utils import add_done_task, add_running_task
 from app.conf.bailian_mcp_config import mcp_config
 from agents.mcp import MCPServerStreamableHttp
 from app.core.logger import logger
+
+
+def _normalize_title_text(text: str) -> str:
+    text = (text or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _title_tokens(text: str):
+    normalized = _normalize_title_text(text)
+    if not normalized:
+        return []
+    return [token for token in normalized.split(" ") if token]
+
+
+def _title_overlap_ratio(expected: str, candidate: str) -> float:
+    expected_tokens = set(_title_tokens(expected))
+    candidate_tokens = set(_title_tokens(candidate))
+    if not expected_tokens or not candidate_tokens:
+        return 0.0
+    return len(expected_tokens & candidate_tokens) / len(expected_tokens)
+
+
+def _is_related_to_requested_titles(doc: dict, requested_titles) -> bool:
+    requested_titles = [title for title in (requested_titles or []) if title]
+    if not requested_titles:
+        return True
+
+    candidate_title = (doc.get("title") or "").strip()
+    candidate_text = f"{candidate_title}\n{(doc.get('snippet') or '').strip()}"
+    candidate_norm = _normalize_title_text(candidate_text)
+    if not candidate_norm:
+        return False
+
+    for requested in requested_titles:
+        requested_norm = _normalize_title_text(requested)
+        if not requested_norm:
+            continue
+        if requested_norm in candidate_norm:
+            return True
+        if _title_overlap_ratio(requested, candidate_title) >= 0.6:
+            return True
+    return False
 
 
 def _flatten_exception_messages(exc: BaseException) -> str:
@@ -114,6 +160,7 @@ def node_web_search_mcp(state):
         query = state.get("original_query", "")
 
     docs = []
+    requested_titles = state.get("requested_titles") or []
 
     # 3. 执行搜索
     if query:
@@ -166,6 +213,15 @@ def node_web_search_mcp(state):
                             continue
 
                         docs.append({"title": title, "url": url, "snippet": snippet})
+
+                    if requested_titles:
+                        filtered_docs = [
+                            doc for doc in docs if _is_related_to_requested_titles(doc, requested_titles)
+                        ]
+                        logger.info(
+                            f"MCP 标题相关性过滤: 原始 {len(docs)} 条 -> 保留 {len(filtered_docs)} 条, requested_titles={requested_titles}"
+                        )
+                        docs = filtered_docs
 
                 except json.JSONDecodeError:
                     logger.error(f"MCP 返回结果解析 JSON 失败: {raw_text[:100]}...")

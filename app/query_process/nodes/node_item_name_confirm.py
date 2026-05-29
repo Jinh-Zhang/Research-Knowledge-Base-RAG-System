@@ -32,6 +32,7 @@ HIGH_SCORE_THRESHOLD = 0.8
 MID_SCORE_THRESHOLD = 0.5
 TITLE_CONTAINS_SCORE_THRESHOLD = 0.45
 TOKEN_OVERLAP_THRESHOLD = 0.6
+TITLE_RELATED_THRESHOLD = 0.35
 
 
 VENUE_ALIASES = {
@@ -109,6 +110,24 @@ def _is_title_text_match(extracted_name: str, candidate_title: str) -> bool:
     )
 
 
+def _is_title_candidate_related(extracted_name: str, candidate_title: str) -> bool:
+    extracted_norm = _normalize_title_text(extracted_name)
+    candidate_norm = _normalize_title_text(candidate_title)
+    if not extracted_norm or not candidate_norm:
+        return False
+
+    if extracted_norm == candidate_norm:
+        return True
+
+    if extracted_norm in candidate_norm or candidate_norm in extracted_norm:
+        return True
+
+    return (
+        _calc_title_overlap_ratio(extracted_name, candidate_title)
+        >= TITLE_RELATED_THRESHOLD
+    )
+
+
 def _dedupe_title_candidates(candidates: List[str], limit: int = 3) -> List[str]:
     deduped = []
     seen = set()
@@ -122,6 +141,64 @@ def _dedupe_title_candidates(candidates: List[str], limit: int = 3) -> List[str]
         if len(deduped) >= limit:
             break
     return deduped
+
+
+def _can_promote_to_explicit_paper_title(
+    original_query: str,
+    history: List[Dict],
+    candidate_title: str,
+) -> bool:
+    candidate_norm = _normalize_title_text(candidate_title)
+    if not candidate_norm:
+        return False
+
+    query_norm = _normalize_title_text(original_query or "")
+    if query_norm and (
+        candidate_norm in query_norm
+        or _calc_title_overlap_ratio(candidate_title, original_query or "") >= 0.8
+    ):
+        return True
+
+    history_text = " ".join(
+        _normalize_title_text(msg.get("text", ""))
+        for msg in (history or [])
+        if isinstance(msg, dict)
+    )
+    if history_text and candidate_norm in history_text:
+        return True
+
+    return False
+
+
+def _downgrade_unexplicit_paper_titles(
+    original_query: str,
+    history: List[Dict],
+    paper_titles: List[str],
+    retrieval_titles: List[str],
+) -> tuple[List[str], List[str]]:
+    kept_paper_titles = []
+    merged_retrieval_titles = list(retrieval_titles or [])
+
+    for title in paper_titles or []:
+        if _can_promote_to_explicit_paper_title(original_query, history, title):
+            kept_paper_titles.append(title)
+        else:
+            logger.info(
+                f"Node: 标题[{title}]未在当前问题或历史中被明确提及，降级为 retrieval_title"
+            )
+            merged_retrieval_titles.append(title)
+
+    return (
+        _dedupe_title_candidates(kept_paper_titles),
+        _dedupe_title_candidates(merged_retrieval_titles),
+    )
+
+
+def _normalize_query_mode(value: str) -> str:
+    mode = (value or "").strip().lower()
+    if mode in {"single", "multi", "topic"}:
+        return mode
+    return "single"
 
 
 def _extract_query_metadata(query: str) -> Dict[str, str]:
@@ -182,44 +259,6 @@ def _query_papers_by_metadata(metadata_filter: Dict[str, str], limit: int = 20) 
             titles.append(title)
     return titles
 
-
-def _llm_infer_best_paper(original_query: str, candidates: List[str]) -> Optional[str]:
-    """
-    当向量检索命中多个中置信度候选时，调用 LLM 从候选列表中推断最可能的论文标题。
-    若 LLM 无法确认，返回 None。
-    """
-    if not candidates:
-        return None
-
-    candidates_text = "\n".join(f"- {c}" for c in candidates)
-    prompt = (
-        f"用户的问题是：\"{original_query}\"\n\n"
-        f"从向量数据库中检索到以下候选论文标题：\n{candidates_text}\n\n"
-        "请判断用户最可能询问的是哪篇论文。\n"
-        "如果可以明确推断出唯一一篇，请仅返回该论文的完整标题（原文，不要修改），不要加任何解释。\n"
-        "如果无法确定，请仅返回：UNKNOWN"
-    )
-
-    try:
-        client = get_llm_client(json_mode=False)
-        messages = [
-            SystemMessage(content="你是一个专业的科研助手，擅长根据上下文推断用户意图。"),
-            HumanMessage(content=prompt),
-        ]
-        response = client.invoke(messages)
-        result = (response.content or "").strip()
-        logger.info(f"LLM 二次推断结果: '{result}'")
-        if result and result != "UNKNOWN":
-            # 验证 LLM 返回的标题确实在候选列表中（防止幻觉）
-            for candidate in candidates:
-                if candidate.strip() == result or _normalize_title_text(candidate) == _normalize_title_text(result):
-                    return candidate
-        return None
-    except Exception as e:
-        logger.error(f"LLM 二次推断失败: {e}")
-        return None
-
-
 def step_3_extract_info(query: str, history: List[Dict]) -> Dict:
     """
     利用LLM从当前问题以及历史会话中提取出主要询问的论文标题 paper_titles（可多个，JSON列表形式）
@@ -277,7 +316,10 @@ def step_3_extract_info(query: str, history: List[Dict]) -> Dict:
             result["rewritten_query"] = query
         if "retrieval_titles" not in result:
             result["retrieval_titles"] = []
+        if "query_mode" not in result:
+            result["query_mode"] = "single"
 
+        result["query_mode"] = _normalize_query_mode(result.get("query_mode", "single"))
         result["paper_titles"] = _dedupe_title_candidates(
             result.get("paper_titles", [])
         )
@@ -286,7 +328,7 @@ def step_3_extract_info(query: str, history: List[Dict]) -> Dict:
         )
 
         logger.info(
-            f"Step 3: 提取结果解析成功 - 论文标题: {result['paper_titles']}, 检索短语: {result['retrieval_titles']}, 重写问题: {result['rewritten_query']}"
+            f"Step 3: 提取结果解析成功 - query_mode: {result['query_mode']}, 论文标题: {result['paper_titles']}, 检索短语: {result['retrieval_titles']}, 重写问题: {result['rewritten_query']}"
         )
         return result
 
@@ -323,6 +365,14 @@ def _generate_general_answer(query: str, history: List[Dict]) -> str:
         answer = ""
 
     return answer
+
+def _build_out_of_kb_prefix(requested_titles: List[str]) -> str:
+    requested_titles = [title for title in (requested_titles or []) if title]
+    titles_text = "、".join(requested_titles[:3]) if requested_titles else "该论文"
+    return (
+        f"说明：我识别到您提到的是《{titles_text}》，"
+        "但当前本地知识库未收录这篇论文。以下内容基于联网检索结果整理，不是来自本地知识库原文。"
+    )
 
 
 def step_4_vectorize_and_query(
@@ -405,11 +455,11 @@ def step_4_vectorize_and_query(
 
                 results.append({"extracted_name": name, "matches": matches})
                 logger.info(
-                    f"Step 4: 商品 '{name}' 检索完成，找到 {len(matches)} 个匹配项"
+                    f"Step 4: '{name}' 检索完成，找到 {len(matches)} 个匹配项"
                 )
 
             except Exception as inner_e:
-                logger.error(f"Step 4: 处理商品 '{name}' 时出错: {inner_e}")
+                logger.error(f"Step 4: 处理 '{name}' 时出错: {inner_e}")
                 results.append({"extracted_name": name, "matches": []})
 
     except Exception as e:
@@ -418,7 +468,12 @@ def step_4_vectorize_and_query(
     return results
 
 
-def step_5_align_paper_titles(query_results: List[Dict], original_query: str = "") -> Dict:
+def step_5_align_paper_titles(
+    query_results: List[Dict],
+    original_query: str = "",
+    strict_title_match: bool = False,
+    query_mode: str = "single",
+) -> Dict:
     """
     根据 Milvus 搜索评分，对齐论文标题，生成「确认论文标题」和「候选论文标题」
     """
@@ -426,6 +481,8 @@ def step_5_align_paper_titles(query_results: List[Dict], original_query: str = "
 
     confirmed_paper_titles = []
     options = []
+    unmatched_titles = []
+    allow_single_confirm = query_mode == "single"
 
     for res in query_results:
         extracted_name = res.get("extracted_name", "").strip()
@@ -464,7 +521,7 @@ def step_5_align_paper_titles(query_results: List[Dict], original_query: str = "
             best_match = text_matched[0]
             best_title = best_match.get("paper_title")
             best_score = best_match.get("score", 0)
-            if best_score >= TITLE_CONTAINS_SCORE_THRESHOLD:
+            if allow_single_confirm and best_score >= TITLE_CONTAINS_SCORE_THRESHOLD:
                 confirmed_paper_titles.append(best_title)
                 logger.info(
                     f"Step 5: 规则T命中 (Title Text Match) -> 确认: {best_title}"
@@ -482,15 +539,36 @@ def step_5_align_paper_titles(query_results: List[Dict], original_query: str = "
                 )
             continue
 
+        candidate_pool = matches
+        if strict_title_match and extracted_name:
+            candidate_pool = [
+                match
+                for match in matches
+                if _is_title_candidate_related(
+                    extracted_name,
+                    match.get("paper_title") or "",
+                )
+            ]
+            if not candidate_pool:
+                unmatched_titles.append(extracted_name)
+                logger.info(
+                    f"Step 5: 严格标题模式未找到词面相关候选 -> extracted='{extracted_name}'，视为库外论文或未收录"
+                )
+                continue
+
         # 筛选
-        high = [m for m in matches if m.get("score", 0) >= HIGH_SCORE_THRESHOLD]
-        mid = [m for m in matches if m.get("score", 0) >= MID_SCORE_THRESHOLD]
+        high = [m for m in candidate_pool if m.get("score", 0) >= HIGH_SCORE_THRESHOLD]
+        mid = [m for m in candidate_pool if m.get("score", 0) >= MID_SCORE_THRESHOLD]
 
         # 规则 A: 单个高置信度
         if len(high) == 1:
             confirmed_name = high[0].get("paper_title")
-            confirmed_paper_titles.append(confirmed_name)
-            logger.info(f"Step 5: 规则A命中 (Single High) -> 确认: {confirmed_name}")
+            if allow_single_confirm:
+                confirmed_paper_titles.append(confirmed_name)
+                logger.info(f"Step 5: 规则A命中 (Single High) -> 确认: {confirmed_name}")
+            else:
+                options.append(confirmed_name)
+                logger.info(f"Step 5: 规则A在 {query_mode} 模式下改为候选: {confirmed_name}")
             continue
 
         # 规则 B: 多个高置信度
@@ -513,28 +591,27 @@ def step_5_align_paper_titles(query_results: List[Dict], original_query: str = "
                     f"Step 5: 规则B命中 (Highest Score) -> 确认: {picked.get('paper_title')}"
                 )
 
-            confirmed_paper_titles.append(picked.get("paper_title"))
+            if allow_single_confirm:
+                confirmed_paper_titles.append(picked.get("paper_title"))
+            else:
+                options.extend([m.get("paper_title") for m in high[:5] if m.get("paper_title")])
+                logger.info(f"Step 5: 规则B在 {query_mode} 模式下改为候选: {[m.get('paper_title') for m in high[:5] if m.get('paper_title')]}")
             continue
 
-        # 规则 C: 无高置信度，取中置信度候选 -> 先用 LLM 二次推断
+        # 规则 C: 无高置信度，取中置信度候选
         if len(mid) > 0:
             current_options = [m.get("paper_title") for m in mid[:5] if m.get("paper_title")]
             logger.info(f"Step 5: 规则C命中 (Mid Confidence) -> 候选: {current_options}")
-
-            inferred = _llm_infer_best_paper(original_query or extracted_name, current_options)
-            if inferred:
-                confirmed_paper_titles.append(inferred)
-                logger.info(f"Step 5: 规则C LLM推断命中 -> 确认: {inferred}")
-            else:
-                options.extend(current_options)
-                logger.info(f"Step 5: 规则C LLM无法推断 -> 添加候选: {current_options}")
             continue
 
         logger.info(f"Step 5: 规则D命中 (Low Confidence) -> 无匹配")
+        if strict_title_match and extracted_name:
+            unmatched_titles.append(extracted_name)
 
     result = {
         "confirmed_paper_titles": list(set(confirmed_paper_titles)),
         "options": list(set(options)),
+        "unmatched_titles": list(set(unmatched_titles)),
     }
     logger.info(f"Step 5: 对齐结果: {result}")
     return result
@@ -546,6 +623,7 @@ def step_6_check_confirmation(
     session_id: str,
     history: List[Dict],
     rewritten_query: str,
+    requested_titles: Optional[List[str]] = None,
 ) -> Dict:
     """
     检查对齐结果，更新 State
@@ -558,6 +636,7 @@ def step_6_check_confirmation(
 
     confirmed = align_result.get("confirmed_paper_titles", [])
     options = align_result.get("options", [])
+    unmatched_titles = align_result.get("unmatched_titles", [])
 
     # 分支 A: 有确认论文标题
     if confirmed:
@@ -592,12 +671,22 @@ def step_6_check_confirmation(
 
     # 分支 C: 无结果
     logger.info("Step 6: [分支C] 无确认也无候选")
-    state["answer"] = _generate_general_answer(
-        state.get("original_query", "") or rewritten_query,
-        history,
-    )
-    state["paper_titles"] = []
-    state["rewritten_query"] = rewritten_query
+    if unmatched_titles or requested_titles:
+        fallback_titles = unmatched_titles or requested_titles or []
+        logger.info(f"Step 6: [分支C-联网兜底] 库外论文，转入后续联网检索: {fallback_titles}")
+        state["answer_prefix"] = _build_out_of_kb_prefix(fallback_titles)
+        state["fallback_to_web_only"] = True
+        state["paper_titles"] = []
+        state["rewritten_query"] = rewritten_query
+        if "answer" in state:
+            del state["answer"]
+    else:
+        state["answer"] = _generate_general_answer(
+            state.get("original_query", "") or rewritten_query,
+            history,
+        )
+        state["paper_titles"] = []
+        state["rewritten_query"] = rewritten_query
     return state
 
 
@@ -659,6 +748,16 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
     paper_titles = _dedupe_title_candidates(extract_res.get("paper_titles", []))
     retrieval_titles = _dedupe_title_candidates(extract_res.get("retrieval_titles", []))
     rewritten_query = extract_res.get("rewritten_query", original_query)
+    query_mode = _normalize_query_mode(extract_res.get("query_mode", "single"))
+    if query_mode in {"multi", "topic"}:
+        rewritten_query = original_query
+    paper_titles, retrieval_titles = _downgrade_unexplicit_paper_titles(
+        original_query,
+        history,
+        paper_titles,
+        retrieval_titles,
+    )
+    explicit_paper_titles = list(paper_titles)
 
     if len(paper_titles) == 0:
         if retrieval_titles:
@@ -678,19 +777,31 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
 
     # 更新 State 中的 rewrite_query
     state["rewritten_query"] = rewritten_query
+    state["requested_titles"] = explicit_paper_titles
+    state["query_mode"] = query_mode
 
     align_result = {}
 
     # 4. & 5. 如果有提取到论文标题，进行搜索和对齐
     if len(paper_titles) > 0:
         query_results = step_4_vectorize_and_query(paper_titles, metadata_filter)
-        align_result = step_5_align_paper_titles(query_results, original_query)
+        align_result = step_5_align_paper_titles(
+            query_results,
+            original_query,
+            strict_title_match=bool(explicit_paper_titles),
+            query_mode=query_mode,
+        )
     else:
         logger.info("Node: 未提取到论文标题，跳过向量检索")
 
     # 6. 检查确认状态
     state = step_6_check_confirmation(
-        state, align_result, session_id, history, rewritten_query
+        state,
+        align_result,
+        session_id,
+        history,
+        rewritten_query,
+        requested_titles=explicit_paper_titles,
     )
 
     # 7. 写入最终历史
