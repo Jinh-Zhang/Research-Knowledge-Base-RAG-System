@@ -33,6 +33,8 @@ MID_SCORE_THRESHOLD = 0.5
 TITLE_CONTAINS_SCORE_THRESHOLD = 0.45
 TOKEN_OVERLAP_THRESHOLD = 0.6
 TITLE_RELATED_THRESHOLD = 0.35
+AUX_OPTION_SCORE_THRESHOLD = 0.7
+AUX_OPTION_OVERLAP_THRESHOLD = 0.6
 
 
 VENUE_ALIASES = {
@@ -192,6 +194,37 @@ def _downgrade_unexplicit_paper_titles(
         _dedupe_title_candidates(kept_paper_titles),
         _dedupe_title_candidates(merged_retrieval_titles),
     )
+
+
+def _build_title_inputs(
+    original_query: str,
+    history: List[Dict],
+    extract_res: Dict,
+    metadata_filter: Optional[Dict[str, str]] = None,
+) -> Dict[str, List[str] | bool]:
+    explicit_titles = _dedupe_title_candidates(extract_res.get("paper_titles", []))
+    auxiliary_titles = _dedupe_title_candidates(extract_res.get("retrieval_titles", []))
+    explicit_titles, auxiliary_titles = _downgrade_unexplicit_paper_titles(
+        original_query,
+        history,
+        explicit_titles,
+        auxiliary_titles,
+    )
+
+    metadata_titles: List[str] = []
+    if not explicit_titles and not auxiliary_titles and _build_metadata_filter(metadata_filter or {}):
+        metadata_titles = _query_papers_by_metadata(metadata_filter or {})
+
+    search_titles = explicit_titles or auxiliary_titles or metadata_titles
+    should_confirm_titles = bool(explicit_titles)
+
+    return {
+        "explicit_titles": explicit_titles,
+        "auxiliary_titles": auxiliary_titles,
+        "metadata_titles": metadata_titles,
+        "search_titles": search_titles,
+        "should_confirm_titles": should_confirm_titles,
+    }
 
 
 def _normalize_query_mode(value: str) -> str:
@@ -473,6 +506,7 @@ def step_5_align_paper_titles(
     original_query: str = "",
     strict_title_match: bool = False,
     query_mode: str = "single",
+    allow_auxiliary_options: bool = False,
 ) -> Dict:
     """
     根据 Milvus 搜索评分，对齐论文标题，生成「确认论文标题」和「候选论文标题」
@@ -538,6 +572,22 @@ def step_5_align_paper_titles(
                     f"Step 5: 规则T命中但分数偏低 -> 添加候选: {[m.get('paper_title') for m in text_matched[:5]]}"
                 )
             continue
+
+        if not strict_title_match and allow_auxiliary_options and extracted_name:
+            best_match = matches[0]
+            best_title = best_match.get("paper_title") or ""
+            best_score = best_match.get("score", 0)
+            overlap_ratio = _calc_title_overlap_ratio(extracted_name, best_title)
+            if (
+                best_score >= AUX_OPTION_SCORE_THRESHOLD
+                and overlap_ratio >= AUX_OPTION_OVERLAP_THRESHOLD
+            ):
+                options.append(best_title)
+                logger.info(
+                    f"Step 5: 辅助标题高分词面相关 -> 添加候选: {best_title} "
+                    f"(score={best_score:.3f}, overlap={overlap_ratio:.3f})"
+                )
+                continue
 
         candidate_pool = matches
         if strict_title_match and extracted_name:
@@ -624,6 +674,8 @@ def step_6_check_confirmation(
     history: List[Dict],
     rewritten_query: str,
     requested_titles: Optional[List[str]] = None,
+    allow_out_of_kb_fallback: bool = True,
+    allow_title_options: bool = True,
 ) -> Dict:
     """
     检查对齐结果，更新 State
@@ -661,7 +713,7 @@ def step_6_check_confirmation(
         return state
 
     # 分支 B: 有候选论文标题
-    if options:
+    if allow_title_options and options:
         logger.info(f"Step 6: [分支B] 存在候选论文标题: {options}")
         options_str = "、".join(options[:3])
         answer = f"您是想问以下哪篇论文：{options_str}？请进一步明确论文标题。"
@@ -671,7 +723,7 @@ def step_6_check_confirmation(
 
     # 分支 C: 无结果
     logger.info("Step 6: [分支C] 无确认也无候选")
-    if unmatched_titles or requested_titles:
+    if allow_out_of_kb_fallback and (unmatched_titles or requested_titles):
         fallback_titles = unmatched_titles or requested_titles or []
         logger.info(f"Step 6: [分支C-联网兜底] 库外论文，转入后续联网检索: {fallback_titles}")
         state["answer_prefix"] = _build_out_of_kb_prefix(fallback_titles)
@@ -681,6 +733,10 @@ def step_6_check_confirmation(
         if "answer" in state:
             del state["answer"]
     else:
+        if unmatched_titles or requested_titles:
+            logger.info(
+                "Step 6: 当前检索仅用于辅助召回，不触发库外论文联网兜底，改为普通大模型回答"
+            )
         state["answer"] = _generate_general_answer(
             state.get("original_query", "") or rewritten_query,
             history,
@@ -745,52 +801,58 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
     # 3. 提取信息
     extract_res = step_3_extract_info(original_query, history)
     metadata_filter = _extract_query_metadata(original_query)
-    paper_titles = _dedupe_title_candidates(extract_res.get("paper_titles", []))
-    retrieval_titles = _dedupe_title_candidates(extract_res.get("retrieval_titles", []))
     rewritten_query = extract_res.get("rewritten_query", original_query)
     query_mode = _normalize_query_mode(extract_res.get("query_mode", "single"))
     if query_mode in {"multi", "topic"}:
         rewritten_query = original_query
-    paper_titles, retrieval_titles = _downgrade_unexplicit_paper_titles(
+    title_inputs = _build_title_inputs(
         original_query,
         history,
-        paper_titles,
-        retrieval_titles,
+        extract_res,
+        metadata_filter,
     )
-    explicit_paper_titles = list(paper_titles)
+    explicit_titles = list(title_inputs["explicit_titles"])
+    auxiliary_titles = list(title_inputs["auxiliary_titles"])
+    metadata_titles = list(title_inputs["metadata_titles"])
+    search_titles = list(title_inputs["search_titles"])
+    should_confirm_titles = bool(title_inputs["should_confirm_titles"])
+    allow_out_of_kb_fallback = should_confirm_titles
+    allow_auxiliary_options = bool(auxiliary_titles) and not should_confirm_titles
 
-    if len(paper_titles) == 0:
-        if retrieval_titles:
-            logger.info(
-                f"Node: LLM 未提取到标准论文标题，改用同次返回的检索短语 -> {retrieval_titles}"
-            )
-            paper_titles = retrieval_titles
-        elif _build_metadata_filter(metadata_filter):
-            metadata_titles = _query_papers_by_metadata(metadata_filter)
-            if metadata_titles:
-                logger.info(f"Node: 按论文元数据命中论文标题 -> {metadata_titles}")
-                paper_titles = metadata_titles
-            else:
-                logger.info(f"Node: 按论文元数据未命中论文标题 -> {metadata_filter}")
-        else:
-            logger.info("Node: LLM 未提取到论文标题，检索短语也为空")
+    if explicit_titles:
+        logger.info(f"Node: 提取到用户显式论文标题 -> {explicit_titles}")
+    elif auxiliary_titles:
+        logger.info(f"Node: 未提取到显式论文标题，使用辅助检索短语 -> {auxiliary_titles}")
+    elif metadata_titles:
+        logger.info(f"Node: 按论文元数据命中论文标题 -> {metadata_titles}")
+    else:
+        logger.info("Node: 未提取到论文标题，辅助检索短语和元数据检索也为空")
 
     # 更新 State 中的 rewrite_query
     state["rewritten_query"] = rewritten_query
-    state["requested_titles"] = explicit_paper_titles
+    state["requested_titles"] = explicit_titles
     state["query_mode"] = query_mode
 
     align_result = {}
 
     # 4. & 5. 如果有提取到论文标题，进行搜索和对齐
-    if len(paper_titles) > 0:
-        query_results = step_4_vectorize_and_query(paper_titles, metadata_filter)
-        align_result = step_5_align_paper_titles(
-            query_results,
-            original_query,
-            strict_title_match=bool(explicit_paper_titles),
-            query_mode=query_mode,
-        )
+    if len(search_titles) > 0:
+        query_results = step_4_vectorize_and_query(search_titles, metadata_filter)
+        if should_confirm_titles:
+            align_result = step_5_align_paper_titles(
+                query_results,
+                original_query,
+                strict_title_match=True,
+                query_mode=query_mode,
+            )
+        else:
+            align_result = step_5_align_paper_titles(
+                query_results,
+                original_query,
+                strict_title_match=False,
+                query_mode=query_mode,
+                allow_auxiliary_options=allow_auxiliary_options,
+            )
     else:
         logger.info("Node: 未提取到论文标题，跳过向量检索")
 
@@ -801,7 +863,9 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
         session_id,
         history,
         rewritten_query,
-        requested_titles=explicit_paper_titles,
+        requested_titles=explicit_titles,
+        allow_out_of_kb_fallback=allow_out_of_kb_fallback,
+        allow_title_options=should_confirm_titles,
     )
 
     # 7. 写入最终历史

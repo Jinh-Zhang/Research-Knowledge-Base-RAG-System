@@ -85,6 +85,7 @@ def create_default_state(**overrides) -> ImportGraphState:
 
     # 默认状态
     state = copy.deepcopy(graph_default_state)
+    # 用 overrides 覆盖默认值
     state.update(overrides)
     # 返回创建好的状态字典实例
     return state

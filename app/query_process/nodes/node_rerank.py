@@ -150,7 +150,7 @@ def node_rerank(state):
     Rerank节点
     对检索到的文档进行重新排序，提高相关性
     """
-    print("---Rerank---")
+    logger.info("---Rerank---")
     add_running_task(
         state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream")
     )
@@ -161,7 +161,10 @@ def node_rerank(state):
     scored_docs = step_2_rerank_docs(state, doc_items)
     # 阶段三：动态 TopK
     topk_docs = step_3_topk(scored_docs)
-    print("最终文档:", topk_docs)
+    logger.info(
+        f"Rerank 输出完成，最终保留 {len(topk_docs)} 条文档，来源分布="
+        f"{[doc.get('source') for doc in topk_docs[:10]]}"
+    )
 
     add_done_task(
         state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream")
@@ -311,7 +314,7 @@ def step_2_rerank_docs(state, doc_items):
             ]
             if local_rerank_weight > 0:
                 local_pairs = [[question, t] for t in local_texts]
-                local_scores = reranker.compute_score(local_pairs, max_length=256, batch_size=8)
+                local_scores = reranker.compute_score(local_pairs, batch_size=8)
                 local_norm_scores = _normalize_scores(local_scores)
             else:
                 local_scores = [0.0 for _ in local_docs]
@@ -354,7 +357,7 @@ def step_2_rerank_docs(state, doc_items):
                 for d in web_docs
             ]
             web_pairs = [[question, t] for t in web_texts]
-            web_scores = reranker.compute_score(web_pairs, max_length=256, batch_size=8)
+            web_scores = reranker.compute_score(web_pairs, batch_size=8)
             web_norm_scores = _normalize_scores(web_scores)
 
             for item, text, raw_score, norm_score in zip(web_docs, web_texts, web_scores, web_norm_scores):
