@@ -16,4 +16,4 @@ embedding_test.py
 generate_ragas_eval_data.py
 test.py
 generate_ragas_eval_data.py
-
+*.html
