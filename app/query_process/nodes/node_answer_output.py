@@ -16,6 +16,28 @@ IMAGE_BLOCK_PATTERN = re.compile(r"【\s*图片\s*】|\[\s*图片\s*\]")
 URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
 DISPLAY_TITLE_KEYS = ("paper_title", "file_title", "title", "parent_title")
 
+
+def _build_multi_paper_answer_style(paper_titles) -> str:
+    titles = [title for title in (paper_titles or []) if str(title).strip()]
+    if len(titles) <= 1:
+        return ""
+
+    return (
+        "\n\n【多篇论文回答格式要求】\n"
+        "当前问题对应多篇论文，请不要写成泛泛的主题综述，也不要只在最后统一列来源。\n"
+        "必须按论文逐条回答，每一条都显式写出论文标题，并严格尽量使用以下结构：\n"
+        "1. 论文标题：<标题>\n"
+        "   核心问题：<这篇论文要解决什么问题>\n"
+        "   方法要点：<方法/机制/模型设计>\n"
+        "   结果或贡献：<实验结果、贡献或适用范围>\n"
+        "\n"
+        "额外要求：\n"
+        "- 如果最终选择回答 2 到 4 篇论文，每一篇都必须在该条开头写出标题。\n"
+        "- 不要把论文标题只放在最后的“来源”或“参考”部分。\n"
+        "- 如果某条信息不足，就明确说该论文的可确认信息有限，但标题仍然要写出来。\n"
+        "- 优先围绕最相关的论文逐条总结，而不是先写长篇主题概述。\n"
+    )
+
 def node_answer_output(state: QueryGraphState) -> QueryGraphState:
     """
     1 判断state 中的answer是否已经存在，如果存在直接输出answer中的答案，注意判断是否需要流式输出需要则流式输出
@@ -245,6 +267,7 @@ def step_2_construct_prompt(state: QueryGraphState) -> str:
         paper_titles=paper_titles_str,
         question=question,
     )
+    prompt += _build_multi_paper_answer_style(paper_titles)
 
     logger.info(f"组装后的提示词为：{prompt}")
 

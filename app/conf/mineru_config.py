@@ -12,9 +12,13 @@ load_dotenv()
 @dataclass
 class MineruConfig:
     base_url: str
-    api_token : str
+    api_token: str
+    poll_timeout_seconds: int
+    poll_interval_seconds: int
 
 mineru_config = MineruConfig(
     base_url=os.getenv("MINERU_BASE_URL"),
-    api_token=os.getenv("MINERU_API_TOKEN")
+    api_token=os.getenv("MINERU_API_TOKEN"),
+    poll_timeout_seconds=int(os.getenv("MINERU_POLL_TIMEOUT_SECONDS", "1800")),
+    poll_interval_seconds=int(os.getenv("MINERU_POLL_INTERVAL_SECONDS", "5")),
 )

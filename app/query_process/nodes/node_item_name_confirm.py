@@ -35,6 +35,7 @@ TOKEN_OVERLAP_THRESHOLD = 0.6
 TITLE_RELATED_THRESHOLD = 0.35
 AUX_OPTION_SCORE_THRESHOLD = 0.7
 AUX_OPTION_OVERLAP_THRESHOLD = 0.6
+AUTO_TOPIC_PICK_LIMIT = 3
 
 
 VENUE_ALIASES = {
@@ -659,9 +660,9 @@ def step_5_align_paper_titles(
             unmatched_titles.append(extracted_name)
 
     result = {
-        "confirmed_paper_titles": list(set(confirmed_paper_titles)),
-        "options": list(set(options)),
-        "unmatched_titles": list(set(unmatched_titles)),
+        "confirmed_paper_titles": _dedupe_title_candidates(confirmed_paper_titles, limit=20),
+        "options": _dedupe_title_candidates(options, limit=20),
+        "unmatched_titles": _dedupe_title_candidates(unmatched_titles, limit=20),
     }
     logger.info(f"Step 5: 对齐结果: {result}")
     return result
@@ -676,6 +677,7 @@ def step_6_check_confirmation(
     requested_titles: Optional[List[str]] = None,
     allow_out_of_kb_fallback: bool = True,
     allow_title_options: bool = True,
+    query_mode: str = "single",
 ) -> Dict:
     """
     检查对齐结果，更新 State
@@ -689,6 +691,12 @@ def step_6_check_confirmation(
     confirmed = align_result.get("confirmed_paper_titles", [])
     options = align_result.get("options", [])
     unmatched_titles = align_result.get("unmatched_titles", [])
+    logger.info(
+        "Step 6: decision inputs -> "
+        f"confirmed={len(confirmed)} options={len(options)} unmatched={len(unmatched_titles)} "
+        f"allow_title_options={allow_title_options} allow_out_of_kb_fallback={allow_out_of_kb_fallback} "
+        f"query_mode={query_mode}"
+    )
 
     # 分支 A: 有确认论文标题
     if confirmed:
@@ -714,12 +722,29 @@ def step_6_check_confirmation(
 
     # 分支 B: 有候选论文标题
     if allow_title_options and options:
+        if query_mode in {"multi", "topic"}:
+            auto_selected_titles = options[:AUTO_TOPIC_PICK_LIMIT]
+            logger.info(
+                f"Step 6: [分支B-自动选篇] {query_mode} 模式下存在候选论文标题，"
+                f"自动选择 top-{len(auto_selected_titles)}: {auto_selected_titles}"
+            )
+            state["paper_titles"] = auto_selected_titles
+            state["rewritten_query"] = rewritten_query
+            if "answer" in state:
+                del state["answer"]
+            return state
         logger.info(f"Step 6: [分支B] 存在候选论文标题: {options}")
         options_str = "、".join(options[:3])
         answer = f"您是想问以下哪篇论文：{options_str}？请进一步明确论文标题。"
         state["answer"] = answer
         state["paper_titles"] = []
         return state
+
+    if options and not allow_title_options:
+        logger.info(
+            "Step 6: options exist but branch B is disabled because no explicit paper title "
+            f"was extracted from the user query. options={options[:5]}"
+        )
 
     # 分支 C: 无结果
     logger.info("Step 6: [分支C] 无确认也无候选")
@@ -818,6 +843,15 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
     should_confirm_titles = bool(title_inputs["should_confirm_titles"])
     allow_out_of_kb_fallback = should_confirm_titles
     allow_auxiliary_options = bool(auxiliary_titles) and not should_confirm_titles
+    allow_title_options = bool(search_titles)
+    logger.info(
+        "Node: title routing -> "
+        f"query_mode={query_mode} explicit_titles={len(explicit_titles)} "
+        f"auxiliary_titles={len(auxiliary_titles)} metadata_titles={len(metadata_titles)} "
+        f"search_titles={len(search_titles)} should_confirm_titles={should_confirm_titles} "
+        f"allow_auxiliary_options={allow_auxiliary_options} allow_title_options={allow_title_options} "
+        f"metadata_filter={metadata_filter}"
+    )
 
     if explicit_titles:
         logger.info(f"Node: 提取到用户显式论文标题 -> {explicit_titles}")
@@ -865,7 +899,8 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
         rewritten_query,
         requested_titles=explicit_titles,
         allow_out_of_kb_fallback=allow_out_of_kb_fallback,
-        allow_title_options=should_confirm_titles,
+        allow_title_options=allow_title_options,
+        query_mode=query_mode,
     )
 
     # 7. 写入最终历史
