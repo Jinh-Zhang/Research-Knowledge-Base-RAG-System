@@ -494,6 +494,32 @@
       color:#1f2937;
     }
 
+    .cited-docs{
+      margin-top:12px;
+      padding-top:10px;
+      border-top:1px solid var(--border);
+    }
+    .cited-docs-title{
+      font-size:12px;
+      font-weight:600;
+      color:var(--muted);
+      margin-bottom:6px;
+    }
+    .cited-doc-item{
+      display:flex;
+      align-items:baseline;
+      gap:6px;
+      font-size:13px;
+      color:#334155;
+      line-height:1.6;
+    }
+    .cited-doc-index{
+      flex:0 0 auto;
+      font-size:11px;
+      color:var(--muted);
+      font-weight:600;
+    }
+
     .typing{
       display:inline-flex;gap:6px;align-items:center;
     }
@@ -1254,7 +1280,31 @@
       };
     }
 
-    function renderAnswerWithImages(containerEl, answerText, candidateImageUrls, candidateImageInfos){
+    function renderCitedDocs(containerEl, paperTitles){
+      const titles = (Array.isArray(paperTitles) ? paperTitles : []).map(t => String(t || '').trim()).filter(Boolean);
+      if(!titles.length) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'cited-docs';
+      const heading = document.createElement('div');
+      heading.className = 'cited-docs-title';
+      heading.textContent = '引用文档';
+      wrap.appendChild(heading);
+      titles.forEach((title, i) => {
+        const item = document.createElement('div');
+        item.className = 'cited-doc-item';
+        const idx = document.createElement('span');
+        idx.className = 'cited-doc-index';
+        idx.textContent = `[${i + 1}]`;
+        const text = document.createElement('span');
+        text.textContent = title;
+        item.appendChild(idx);
+        item.appendChild(text);
+        wrap.appendChild(item);
+      });
+      containerEl.appendChild(wrap);
+    }
+
+    function renderAnswerWithImages(containerEl, answerText, candidateImageUrls, candidateImageInfos, paperTitles){
       const { text, images: imagesFromBlock } = parseAnswerAndImages(answerText);
       const candidates = Array.isArray(candidateImageUrls)
         ? candidateImageUrls.map(normalizeUrl).filter(isImageUrl)
@@ -1338,6 +1388,8 @@
         }
         containerEl.appendChild(imgWrap);
       }
+
+      renderCitedDocs(containerEl, paperTitles);
     }
 
     function addUserMsg(text){
@@ -1368,7 +1420,7 @@
       scrollToBottom();
     }
 
-    function addBotMsgWithTime(text, ts, imageUrls, imageInfos){
+    function addBotMsgWithTime(text, ts, imageUrls, imageInfos, paperTitles){
       const id = 'bot-his-' + Math.random().toString(36).slice(2);
       const html = `
         <div class="msg bot" id="${id}">
@@ -1383,7 +1435,7 @@
       const el = document.getElementById(id);
       if(el){
         const answerEl = el.querySelector('.answer');
-        renderAnswerWithImages(answerEl, text || '', imageUrls || [], imageInfos || []);
+        renderAnswerWithImages(answerEl, text || '', imageUrls || [], imageInfos || [], paperTitles || []);
       }
       scrollToBottom();
     }
@@ -1443,7 +1495,7 @@
       }
     }
 
-    function finalizeBotAnswer(botMsgEl, answer, error, imageUrls, imageInfos){
+    function finalizeBotAnswer(botMsgEl, answer, error, imageUrls, imageInfos, paperTitles){
       const bubble = botMsgEl.querySelector('.bubble');
       const progress = botMsgEl.querySelector('details.progress');
       const err = (error || '').trim();
@@ -1472,7 +1524,7 @@
       const answerEl = document.createElement('div');
       answerEl.className = 'answer';
       bubble.appendChild(answerEl);
-      renderAnswerWithImages(answerEl, answer || '', imageUrls || [], imageInfos || []);
+      renderAnswerWithImages(answerEl, answer || '', imageUrls || [], imageInfos || [], paperTitles || []);
       if(progressEl) bubble.appendChild(progressEl);
     }
 
@@ -1520,7 +1572,7 @@
           if(item.role === 'user'){
             addUserMsgWithTime(item.text || '', item.ts);
           }else{
-            addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [], item.image_infos || []);
+            addBotMsgWithTime(item.text || '', item.ts, item.image_urls || [], item.image_infos || [], item.paper_titles || []);
           }
         }
         scrollToBottom();
@@ -1556,13 +1608,13 @@
 
           if(data.status === 'completed'){
             if(typing) typing.remove();
-            finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [], data.image_infos || []);
+            finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [], data.image_infos || [], data.paper_titles || []);
             clearInterval(interval);
             sendBtn.disabled = false;
             loadSessions();
           }else if(data.status === 'failed'){
             if(typing) typing.remove();
-            finalizeBotAnswer(botMsgEl, data.answer, data.error || 'failed', data.image_urls || [], data.image_infos || []);
+            finalizeBotAnswer(botMsgEl, data.answer, data.error || 'failed', data.image_urls || [], data.image_infos || [], data.paper_titles || []);
             clearInterval(interval);
             sendBtn.disabled = false;
             loadSessions();
@@ -1599,7 +1651,7 @@
           // 非流式：直接拿到结果
           // data: { session_id, answer, done_list, error, message }
           renderProgress(botMsgEl, data.done_list || [], [], 'completed');
-          finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [], data.image_infos || []);
+          finalizeBotAnswer(botMsgEl, data.answer, data.error, data.image_urls || [], data.image_infos || [], data.paper_titles || []);
           sendBtn.disabled = false;
           return;
         }
@@ -1639,7 +1691,8 @@
                   answerEl,
                   displayedAnswerText,
                   finalPayload.image_urls || [],
-                  finalPayload.image_infos || []
+                  finalPayload.image_infos || [],
+                  finalPayload.paper_titles || []
                 );
                 finalPayload = null;
                 scrollToBottom();

@@ -109,8 +109,9 @@ def node_answer_output(state: QueryGraphState) -> QueryGraphState:
             {
                 "answer": state["answer"],
                 "status": "completed",
-                "image_urls": image_urls,  # 兼容旧前端
-                "image_infos": image_infos,  # 带 Figure 编号/来源/caption 的结构化图片信息
+                "image_urls": image_urls,
+                "image_infos": image_infos,
+                "paper_titles": state.get("paper_titles") or [],
             },
         )
 

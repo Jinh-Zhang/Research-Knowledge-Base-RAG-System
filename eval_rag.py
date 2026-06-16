@@ -294,7 +294,7 @@ def _paper_titles_for_online_eval(
     if filter_paper_title:
         return [resolve_title(filter_paper_title)]
 
-    paper = (qa.get("paper") or qa.get("source") or "").strip()
+    paper = (qa.get("paper_title") or qa.get("paper") or qa.get("source") or "").strip()
     if not paper or paper.lower() == "unknown":
         return []
 
