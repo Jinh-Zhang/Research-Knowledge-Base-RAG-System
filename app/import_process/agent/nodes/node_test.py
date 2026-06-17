@@ -329,25 +329,3 @@ def node_pdf_to_md(state: ImportGraphState) -> ImportGraphState:
         logger.debug(f"【{func_name}】节点执行完成，\n更新后工作流状态：{format_state(state)}")
 
     return state
-
-if __name__ == "__main__":
-
-    # 单元测试：验证PDF转MD全流程
-    logger.info("===== 开始node_pdf_to_md节点单元测试 =====")
-
-    from app.utils.path_util import PROJECT_ROOT
-    logger.info(f"测试获取根地址：{PROJECT_ROOT}")
-
-    test_pdf_name = os.path.join("doc", "hak180产品安全手册.pdf")
-    test_pdf_path = os.path.join(PROJECT_ROOT, test_pdf_name)
-
-    # 构造测试状态
-    test_state = create_default_state(
-        task_id="test_pdf2md_task_001",
-        pdf_path=test_pdf_path,
-        local_dir=os.path.join(PROJECT_ROOT, "output")
-    )
-
-    node_pdf_to_md(test_state)
-
-    logger.info("===== 结束node_pdf_to_md节点单元测试 =====")

@@ -249,34 +249,3 @@ def node_web_search_mcp(state):
     if docs:
         return {"web_search_docs": docs}
     return {}
-
-
-if __name__ == "__main__":
-    # 测试代码：单独运行该文件时，验证MCP搜索功能是否正常
-    print("\n" + "=" * 50)
-    print(">>> 启动 node_web_search_mcp 本地测试")
-    print("=" * 50)
-
-    test_state = {
-        "session_id": "test_mcp_session",
-        "rewritten_query": "HAK 180 在出厂默认状态下，若想在纸张上只把烫金膜转印到顶部 50 mm–170 mm 的局部区域，应在操作面板上如何设置",
-        "is_stream": False,
-    }
-
-    try:
-        # 调用MCP搜索节点函数，执行测试
-        result_state = node_web_search_mcp(test_state)
-
-        print("\n" + "=" * 50)
-        print(">>> 测试结果摘要:")
-        search_results = result_state.get("web_search_docs", [])
-        print(f"搜索结果数量: {len(search_results)}")
-        if search_results:
-            print("首条结果预览:")
-            print(json.dumps(search_results[0], indent=2, ensure_ascii=False))
-        else:
-            print("未获取到搜索结果")
-        print("=" * 50)
-
-    except Exception as e:
-        logger.exception(f"测试运行期间发生未捕获异常: {e}")

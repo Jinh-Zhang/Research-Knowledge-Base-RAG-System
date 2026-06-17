@@ -96,8 +96,3 @@ def get_default_state() -> ImportGraphState:
     返回一个新的状态实例，避免全局变量污染
     """
     return copy.deepcopy(graph_default_state)
-
-
-if __name__ == "__main__":
-    state = create_default_state(local_file_path="example.pdf")
-    logger.info(state)

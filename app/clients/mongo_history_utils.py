@@ -472,36 +472,3 @@ def get_recent_messages(
         logging.error(f"Error getting recent messages: {e}")
         # 异常时返回空列表，避免上层处理None报错
         return []
-
-
-# 主程序入口：仅当直接运行该脚本时执行，用于简单的功能测试
-if __name__ == "__main__":
-    # 简单测试代码：验证数据库的写入和查询功能是否正常
-    # 测试会话ID，用于标识测试的对话记录
-    sid = "000015_hybrid"
-    # 1. 写入用户消息（手动指定ts=1000，便于测试排序）
-    save_chat_message("demo_user", sid, "user", "你好 (Hybrid)")
-    # 2. 写入助手回复（手动指定ts=1001，按时间顺序紧跟用户消息）
-    save_chat_message(
-        "demo_user",
-        sid,
-        "assistant",
-        "你好！我是基于原生 Mongo + LangChain 对象的助手。",
-    )
-    # 3. 写入带关联论文标题的用户消息（手动指定ts=1002，测试paper_titles字段）
-    save_chat_message(
-        "demo_user",
-        sid,
-        "user",
-        "这篇论文的方法是什么？",
-        paper_titles=["Retrieval-Augmented Generation"],
-    )
-
-    # 4. 查询指定会话的最近5条记录，验证查询功能
-    print("--- 查询 LangChain 对象记录 ---")
-    messages = get_recent_messages(sid, user_id="demo_user", limit=5)
-    # 打印查询到的记录数量
-    print(f"查询到的记录数: {len(messages)}")
-    # 遍历打印每条记录的详细内容
-    for m in messages:
-        print(f" {m}  ")

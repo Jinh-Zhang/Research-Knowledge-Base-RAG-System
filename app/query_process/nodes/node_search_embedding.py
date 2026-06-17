@@ -134,39 +134,3 @@ def node_search_embedding(state):
     # 6. 构造并返回结果：若检索结果非空，取res[0]（适配Milvus批量搜索格式），否则返回空列表
     # res[0]为当前单条查询的检索结果，包含TOP5匹配的向量数据及业务字段
     return {"embedding_chunks": res[0] if res else []}
-
-
-if __name__ == "__main__":
-    # 模拟测试数据
-    test_state = {
-        "session_id": "test_search_embedding_001",
-        "rewritten_query": "HAK 180 烫金机使用说明",  # 模拟改写后的查询
-        "paper_titles": ["Retrieval-Augmented Generation"],  # 模拟已确认的论文标题
-        "is_stream": False,
-    }
-
-    print("\n>>> 开始测试 node_search_embedding 节点...")
-    try:
-        # 执行节点函数
-        result = node_search_embedding(test_state)
-        logger.info(f"检索结果汇总：{result}")
-        # 验证结果
-        chunks = result.get("embedding_chunks", [])
-        print(f"\n>>> 测试完成！检索到 {len(chunks)} 条结果")
-
-        if chunks:
-            print("\n>>> Top 1 结果详情:")
-            top1 = chunks[0]
-            # 打印关键字段（注意：entity字段可能包含具体业务数据）
-            print(f"ID: {top1.get('id')}")
-            print(f"Distance: {top1.get('distance')}")
-            entity = top1.get("entity", {})
-            print(f"Paper Title: {entity.get('paper_title')}")
-            print(f"Content Preview: {entity.get('content', '')[:100]}...")
-        else:
-            print(
-                "\n>>> 警告：未检索到任何结果，请检查 Milvus 数据或 paper_titles 是否匹配"
-            )
-
-    except Exception as e:
-        logger.error(f"测试运行失败: {e}", exc_info=True)

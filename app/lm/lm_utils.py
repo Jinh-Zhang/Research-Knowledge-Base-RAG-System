@@ -76,29 +76,3 @@ def get_llm_client(
     logger.info(f"[LLM客户端] 实例初始化成功并缓存：模型={target_model}，JSON模式={json_mode}")
 
     return llm_client
-
-
-# 测试示例：验证客户端创建、缓存机制及日志输出
-if __name__ == "__main__":
-    logger.info("===== 开始执行LLM客户端工具测试 =====")
-    try:
-        # 测试1：默认配置（默认模型+普通模式）
-        client1 = get_llm_client()
-        logger.info("✅ 测试1通过：默认配置客户端创建成功")
-
-        # 测试2：指定多模态模型（qwen-vl-plus）+ 普通模式
-        client2 = get_llm_client(model="qwen-vl-plus")
-        logger.info("✅ 测试2通过：指定多模态模型客户端创建成功")
-
-        # 测试3：同一模型+模式，验证缓存命中
-        client3 = get_llm_client(model="qwen-vl-plus")
-        logger.info(f"✅ 测试3通过：缓存机制验证成功，client2与client3为同一实例：{client2 is client3}")
-
-        # 测试4：开启JSON输出模式
-        client4 = get_llm_client(model="qwen3-32b", json_mode=True)
-        logger.info("✅ 测试4通过：JSON输出模式客户端创建成功")
-
-    except Exception as e:
-        logger.error(f"❌ LLM客户端工具测试失败：{str(e)}", exc_info=True)
-    finally:
-        logger.info("===== LLM客户端工具测试结束 =====")

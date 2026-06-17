@@ -101,8 +101,3 @@ def fix_log_position(record):
 
 # 应用终极修复，导出全局可用的logger
 logger = base_logger.patch(fix_log_position)
-
-# -------------------------- 测试代码（验证修复效果） --------------------------
-if __name__ == '__main__':
-    logger.info("【测试】logger.py内部调用（仅测试，业务模块调用会显示正确文件名）")
-    print(f"日志文件输出路径：{LOG_FILE_PATH}")

@@ -310,23 +310,3 @@ def step_3_download_and_extract(zip_url: str, output_dir_obj: Path, pdf_stem: st
     final_md_path = str(target_md_file.absolute())
     logger.info(f"===== MinerU result processed for [{pdf_stem}]: {final_md_path} =====")
     return final_md_path
-
-
-if __name__ == "__main__":
-    logger.info("===== start node_pdf_to_md unit test =====")
-
-    from app.utils.path_util import PROJECT_ROOT
-
-    logger.info(f"project root: {PROJECT_ROOT}")
-
-    test_pdf_name = os.path.join("doc", "hl3040缃戠粶璇存槑涔?pdf")
-    test_pdf_path = os.path.join(PROJECT_ROOT, test_pdf_name)
-
-    test_state = create_default_state(
-        task_id="test_pdf2md_task_001",
-        pdf_path=test_pdf_path,
-        local_dir=os.path.join(PROJECT_ROOT, "output"),
-    )
-
-    node_pdf_to_md(test_state)
-    logger.info("===== finish node_pdf_to_md unit test =====")

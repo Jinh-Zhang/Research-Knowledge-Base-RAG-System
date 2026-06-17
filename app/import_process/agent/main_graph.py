@@ -61,7 +61,3 @@ workflow.add_edge("node_bge_embedding", "node_import_milvus")
 workflow.add_edge("node_import_milvus", END)
 
 kb_import_app = workflow.compile()
-
-
-if __name__ == "__main__":
-    logger.info("Import graph compiled successfully.")

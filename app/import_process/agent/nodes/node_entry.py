@@ -57,25 +57,3 @@ def node_entry(state: ImportGraphState) -> ImportGraphState:
     add_done_task(state["task_id"], func_name)
     logger.debug("[%s] end\n%s", func_name, format_state(state))
     return state
-
-
-if __name__ == "__main__":
-    logger.info("===== node_entry tests =====")
-
-    test_state1 = create_default_state(
-        task_id="test_task_001",
-        local_file_path="notes.txt",
-    )
-    node_entry(test_state1)
-
-    test_state2 = create_default_state(
-        task_id="test_task_002",
-        local_file_path="paper.md",
-    )
-    node_entry(test_state2)
-
-    test_state3 = create_default_state(
-        task_id="test_task_003",
-        local_file_path="paper.pdf",
-    )
-    node_entry(test_state3)

@@ -241,38 +241,3 @@ def step_2_search_embedding_hyde(
     except Exception as e:
         logger.error(f"Step 2: 检索过程发生异常: {e}")
         return []
-
-
-if __name__ == "__main__":
-    # 本地测试代码
-    print("\n" + "=" * 50)
-    print(">>> 启动 node_search_embedding_hyde 本地测试")
-    print("=" * 50)
-
-    # 模拟输入状态
-    mock_state = {
-        "session_id": "test_hyde_session_001",
-        "original_query": "HAK 180 烫金机怎么操作？",
-        "rewritten_query": "HAK 180 烫金机的具体操作步骤是什么？",
-        "paper_titles": ["Retrieval-Augmented Generation"],
-        "is_stream": False,
-    }
-
-    try:
-        # 运行节点
-        result = node_search_embedding_hyde(mock_state)
-
-        print("\n" + "=" * 50)
-        print(">>> 测试结果摘要:")
-        print(f"HyDE Doc Generated: {bool(result.get('hyde_doc'))}")
-        if result.get("hyde_doc"):
-            print(f"Doc Preview: {result.get('hyde_doc')[:50]}...")
-
-        chunks = result.get("hyde_embedding_chunks", [])
-        print(f"Chunks Found: {len(chunks)} , chunks内容：{chunks}")
-        if chunks:
-            print(f"Top Chunk Score: {chunks[0].get('distance')}")
-        print("=" * 50)
-
-    except Exception as e:
-        logger.exception(f"测试运行期间发生未捕获异常: {e}")

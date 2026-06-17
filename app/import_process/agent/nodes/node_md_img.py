@@ -452,28 +452,3 @@ def step_5_backup_new_md_file(origin_md_path: str, md_content: str) -> str:
 
     logger.info(f"处理后MD文件已保存，新文件路径：{new_md_file_name}")
     return new_md_file_name
-
-if __name__ == "__main__":
-    """本地测试入口：单独运行该文件时，执行MD图片处理全流程测试"""
-    from app.utils.path_util import PROJECT_ROOT
-    logger.info(f"本地测试 - 项目根目录：{PROJECT_ROOT}")
-
-    # 测试MD文件路径（需手动将测试文件放入对应目录）
-    test_md_name = os.path.join(r"output\hak180产品安全手册", "hak180产品安全手册.md")
-    test_md_path = os.path.join(PROJECT_ROOT, test_md_name)
-
-    # 校验测试文件是否存在
-    if not os.path.exists(test_md_path):
-        logger.error(f"本地测试 - 测试文件不存在：{test_md_path}")
-        logger.info("请检查文件路径，或手动将测试MD文件放入项目根目录的output目录下")
-    else:
-        # 构造测试状态对象，模拟流程入参
-        test_state = {
-            "md_path": test_md_path,
-            "task_id": "test_task_123456",
-            "md_content": ""
-        }
-        logger.info("开始本地测试 - MD图片处理全流程")
-        # 执行核心处理流程
-        result_state = node_md_img(test_state)
-        logger.info(f"本地测试完成 - 处理结果状态：{result_state}")

@@ -918,29 +918,3 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
         f"Node: 处理结束, Final State Paper Titles: {final_state.get('paper_titles')}"
     )
     return final_state
-
-
-if __name__ == "__main__":
-    # 模拟输入状态
-    mock_state = {
-        "session_id": "test_session_001",
-        "original_query": "HAK 180 烫金机怎么用？",
-        "is_stream": False,
-    }
-
-    print(">>> 开始测试 node_item_name_confirm...")
-    try:
-        # 运行节点
-        result_state = node_item_name_confirm(mock_state)
-
-        print("\n>>> 测试完成！最终状态:")
-        print(json.dumps(result_state, indent=2, ensure_ascii=False))
-
-        # 简单验证
-        if result_state.get("paper_titles"):
-            print(f"\n[PASS] 成功提取并确认论文标题: {result_state['paper_titles']}")
-        else:
-            print(f"\n[WARN] 未确认到论文标题 (可能是向量库无匹配或LLM未提取)")
-
-    except Exception as e:
-        print(f"\n[FAIL] 测试运行出错: {e}")
