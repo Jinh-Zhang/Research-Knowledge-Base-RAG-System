@@ -9,6 +9,7 @@ import requests
 
 from app.conf.mineru_config import mineru_config
 from app.core.logger import logger
+from app.import_process.exceptions import ParseFailureError, ParseTimeoutError
 from app.import_process.agent.state import ImportGraphState, create_default_state
 from app.utils.format_utils import format_state
 from app.utils.task_utils import add_done_task, add_running_task
@@ -165,7 +166,7 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
     while True:
         elapsed_time = int(time.time() - start_time)
         if elapsed_time > timeout_seconds:
-            raise TimeoutError(
+            raise ParseTimeoutError(
                 f"[任务轮询] 超时！任务处理超{int(timeout_seconds)}秒，batch_id：{batch_id}"
             )
 
@@ -221,7 +222,7 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
 
         if state_status == "failed":
             err_msg = result_item.get("err_msg", "unknown error")
-            raise RuntimeError(
+            raise ParseFailureError(
                 f"[mineru] task failed: batch_id={batch_id} error={err_msg}"
             )
 
